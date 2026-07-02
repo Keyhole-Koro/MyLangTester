@@ -29,6 +29,17 @@ typedef struct {
     char timer_interval[64];
 } TestMeta;
 
+// Result of parsing a `test(...)` declaration: the metadata plus the byte
+// ranges (into the original source buffer) needed to regenerate a plain
+// MyLang source. All pointers refer into the caller-owned source buffer.
+typedef struct {
+    TestMeta meta;
+    const char *decl_start;  // start of the `test` keyword
+    const char *body_start;  // the callback body's opening '{'
+    const char *body_end;    // the callback body's closing '}'
+    const char *tail;        // first char after the whole `test(...)` statement
+} ParsedTest;
+
 typedef struct {
     char *text;
     size_t len;
@@ -327,11 +338,26 @@ static int is_test_keyword_at(char *source, char *p) {
     return !is_ident_char(p[4]);
 }
 
-static char *find_matching(char *open, char open_char, char close_char) {
-    int depth = 0;
+// Scan forward for the first `test` keyword that is not inside a string,
+// char literal, or comment. `source` is the buffer origin (for the left-hand
+// identifier-boundary check); `from` is where scanning starts.
+static char *find_test_keyword(char *source, char *from) {
     int in_string = 0;
     int in_char = 0;
-    for (char *p = open; *p; p++) {
+    int in_line_comment = 0;
+    int in_block_comment = 0;
+    for (char *p = from; *p; p++) {
+        if (in_line_comment) {
+            if (*p == '\n') in_line_comment = 0;
+            continue;
+        }
+        if (in_block_comment) {
+            if (*p == '*' && p[1] == '/') {
+                in_block_comment = 0;
+                p++;
+            }
+            continue;
+        }
         if (in_string) {
             if (*p == '\\' && p[1]) p++;
             else if (*p == '"') in_string = 0;
@@ -342,7 +368,56 @@ static char *find_matching(char *open, char open_char, char close_char) {
             else if (*p == '\'') in_char = 0;
             continue;
         }
-        if (*p == '"') in_string = 1;
+        if (*p == '/' && p[1] == '/') {
+            in_line_comment = 1;
+            p++;
+        } else if (*p == '/' && p[1] == '*') {
+            in_block_comment = 1;
+            p++;
+        } else if (*p == '"') in_string = 1;
+        else if (*p == '\'') in_char = 1;
+        else if (is_test_keyword_at(source, p)) {
+            return p;
+        }
+    }
+    return NULL;
+}
+
+static char *find_matching(char *open, char open_char, char close_char) {
+    int depth = 0;
+    int in_string = 0;
+    int in_char = 0;
+    int in_line_comment = 0;
+    int in_block_comment = 0;
+    for (char *p = open; *p; p++) {
+        if (in_line_comment) {
+            if (*p == '\n') in_line_comment = 0;
+            continue;
+        }
+        if (in_block_comment) {
+            if (*p == '*' && p[1] == '/') {
+                in_block_comment = 0;
+                p++;
+            }
+            continue;
+        }
+        if (in_string) {
+            if (*p == '\\' && p[1]) p++;
+            else if (*p == '"') in_string = 0;
+            continue;
+        }
+        if (in_char) {
+            if (*p == '\\' && p[1]) p++;
+            else if (*p == '\'') in_char = 0;
+            continue;
+        }
+        if (*p == '/' && p[1] == '/') {
+            in_line_comment = 1;
+            p++;
+        } else if (*p == '/' && p[1] == '*') {
+            in_block_comment = 1;
+            p++;
+        } else if (*p == '"') in_string = 1;
         else if (*p == '\'') in_char = 1;
         else if (*p == open_char) depth++;
         else if (*p == close_char) {
@@ -370,8 +445,13 @@ static int append_slice(StringBuf *buf, const char *start, const char *end) {
     return 1;
 }
 
-static int parse_test_declaration_and_write_source(const char *path, char *source, char *decl_start,
-                                                   const char *out_path, TestMeta *meta) {
+// Parse a single `test("name", { ...options }, () => { ...body }) ;`
+// declaration into `out`. Pure: fills `out` (metadata already defaulted by the
+// caller) with the parsed values and source byte ranges, and never touches the
+// filesystem. Returns 1 on success, 0 on a syntax error (message on stderr).
+static int parse_test_declaration(const char *path, char *decl_start, ParsedTest *out) {
+    out->decl_start = decl_start;
+
     char *p = skip_ws(decl_start + 4);
     if (*p != '(') return 0;
     p = skip_ws(p + 1);
@@ -389,7 +469,7 @@ static int parse_test_declaration_and_write_source(const char *path, char *sourc
     }
     char saved_name = name_end[1];
     name_end[1] = '\0';
-    unquote_value(name_start, meta->name, sizeof(meta->name));
+    unquote_value(name_start, out->meta.name, sizeof(out->meta.name));
     name_end[1] = saved_name;
 
     p = skip_ws(name_end + 1);
@@ -412,7 +492,7 @@ static int parse_test_declaration_and_write_source(const char *path, char *sourc
     *options_end = '\0';
     char *options_copy = xstrdup(options_start + 1);
     *options_end = saved_options;
-    if (!options_copy || !parse_test_block(meta, options_copy)) {
+    if (!options_copy || !parse_test_block(&out->meta, options_copy)) {
         free(options_copy);
         return 0;
     }
@@ -462,41 +542,60 @@ static int parse_test_declaration_and_write_source(const char *path, char *sourc
     p = skip_ws(p + 1);
     if (*p == ';') p++;
 
-    StringBuf sanitized = {0};
-    int ok = append_slice(&sanitized, source, decl_start) &&
-             string_buf_append(&sanitized, "i32 kernel_main() {\n") &&
-             append_slice(&sanitized, body_start + 1, body_end) &&
-             string_buf_append(&sanitized, "\nreturn 0;\n}\n") &&
-             string_buf_append(&sanitized, p) &&
-             write_text_file(out_path, sanitized.text ? sanitized.text : "");
-    string_buf_free(&sanitized);
-    return ok;
+    out->body_start = body_start;
+    out->body_end = body_end;
+    out->tail = p;
+    return 1;
 }
 
+// Turn a parsed test into plain MyLang source: everything before the
+// declaration, the callback body wrapped in `i32 kernel_main()`, then the tail.
+static int generate_source(const char *source, const ParsedTest *test, StringBuf *out) {
+    return append_slice(out, source, test->decl_start) &&
+           string_buf_append(out, "i32 kernel_main() {\n") &&
+           append_slice(out, test->body_start + 1, test->body_end) &&
+           string_buf_append(out, "\nreturn 0;\n}\n") &&
+           string_buf_append(out, test->tail);
+}
+
+// Find and parse the first top-level `test(...)` declaration in `source`.
+// Returns 1 on success (with `out` filled), 0 otherwise.
+static int parse_test_source(const char *path, char *source, ParsedTest *out) {
+    default_meta(&out->meta);
+
+    char *decl_start = find_test_keyword(source, source);
+    while (decl_start) {
+        char *after = skip_ws(decl_start + 4);
+        if (*after == '(') return parse_test_declaration(path, decl_start, out);
+        decl_start = find_test_keyword(source, decl_start + 4);
+    }
+
+    fprintf(stderr, "mytest: missing top-level test declaration in %s\n", path);
+    return 0;
+}
+
+// Read a `.test.mln` file, parse its `test(...)` declaration, and write the
+// generated plain MyLang source to `out_path`. Fills `meta` for the caller.
 static int read_metadata_and_write_source(const char *path, const char *out_path, TestMeta *meta) {
-    default_meta(meta);
     char *source = read_text_file(path);
     if (!source) {
         fprintf(stderr, "mytest: cannot open %s: %s\n", path, strerror(errno));
         return 0;
     }
 
-    char *decl_start = strstr(source, "test");
-    while (decl_start) {
-        if (is_test_keyword_at(source, decl_start)) {
-            char *after = skip_ws(decl_start + 4);
-            if (*after == '(') {
-                int ok = parse_test_declaration_and_write_source(path, source, decl_start, out_path, meta);
-                free(source);
-                return ok;
-            }
-        }
-        decl_start = strstr(decl_start + 4, "test");
+    ParsedTest test;
+    if (!parse_test_source(path, source, &test)) {
+        free(source);
+        return 0;
     }
+    *meta = test.meta;
 
-    fprintf(stderr, "mytest: missing top-level test declaration in %s\n", path);
+    StringBuf sanitized = {0};
+    int ok = generate_source(source, &test, &sanitized) &&
+             write_text_file(out_path, sanitized.text ? sanitized.text : "");
+    string_buf_free(&sanitized);
     free(source);
-    return 0;
+    return ok;
 }
 
 static int find_repo_root(char *out, size_t out_size) {
@@ -530,6 +629,122 @@ static void test_basename(const char *path, char *out, size_t out_size) {
     }
 }
 
+// Filesystem paths derived for one test run.
+typedef struct {
+    char source[PATH_MAX];  // generated plain MyLang source (temporary)
+    char build_dir[PATH_MAX];
+    char stub[PATH_MAX];    // assembly stub that calls kernel_main
+    char linked[PATH_MAX];  // final linked binary fed to the emulator
+    char input[PATH_MAX];   // stdin fixture
+} TestPaths;
+
+// Derive the generated-source path (a dotfile beside the test) and, from the
+// test name, the build-directory artifacts.
+static void derive_paths(const char *repo, const char *abs_test, const char *base,
+                         const char *name, TestPaths *paths) {
+    snprintf(paths->source, sizeof(paths->source), "%s", abs_test);
+    char *source_name = strrchr(paths->source, '/');
+    if (source_name) {
+        source_name++;
+        snprintf(source_name, (size_t)(paths->source + sizeof(paths->source) - source_name),
+                 ".%s.mytest.mln", base);
+    } else {
+        snprintf(paths->source, sizeof(paths->source), ".%s.mytest.mln", base);
+    }
+
+    snprintf(paths->build_dir, sizeof(paths->build_dir), "%s/.mytest/build/%s", repo, name);
+    snprintf(paths->stub, sizeof(paths->stub), "%s/test_stub.masm", paths->build_dir);
+    snprintf(paths->linked, sizeof(paths->linked), "%s/%s_linked.mbin", paths->build_dir, name);
+    snprintf(paths->input, sizeof(paths->input), "%s/stdin.txt", paths->build_dir);
+}
+
+// Write the stub and stdin fixture, then compile and link the test into
+// `paths->linked`. Returns 1 on success, 0 on failure (message on stderr).
+static int build_test(const char *repo, const TestMeta *meta, const TestPaths *paths) {
+    if (!ensure_dir(paths->build_dir)) {
+        fprintf(stderr, "[FAIL] %s: cannot create build dir %s\n", meta->name, paths->build_dir);
+        return 0;
+    }
+
+    StringBuf stub = {0};
+    string_buf_append(&stub, "import { kernel_main } from ");
+    shell_quote_append(&stub, paths->source);
+    string_buf_append(&stub, "\n\n__START__:\n  call kernel_main\n  halt\n");
+    for (char *p = stub.text; p && *p; p++) {
+        if (*p == '\'') *p = '"';
+    }
+    int stub_ok = write_text_file(paths->stub, stub.text ? stub.text : "");
+    string_buf_free(&stub);
+    if (!stub_ok) {
+        fprintf(stderr, "[FAIL] %s: cannot write stub\n", meta->name);
+        return 0;
+    }
+    if (!write_text_file(paths->input, meta->stdin_text)) {
+        fprintf(stderr, "[FAIL] %s: cannot write stdin fixture\n", meta->name);
+        return 0;
+    }
+
+    StringBuf cmd = {0};
+    char tool[PATH_MAX];
+    snprintf(tool, sizeof(tool), "%s/qa/build_toolchain.py", repo);
+    string_buf_append(&cmd, "python3 ");
+    shell_quote_append(&cmd, tool);
+    string_buf_append(&cmd, " ");
+    shell_quote_append(&cmd, paths->stub);
+    string_buf_append(&cmd, " ");
+    shell_quote_append(&cmd, paths->source);
+    string_buf_append(&cmd, " -o ");
+    shell_quote_append(&cmd, paths->linked);
+    string_buf_append(&cmd, " --build-dir ");
+    shell_quote_append(&cmd, paths->build_dir);
+    string_buf_append(&cmd, " >/dev/null");
+
+    int build_status = run_command(cmd.text);
+    string_buf_free(&cmd);
+    if (build_status != 0) {
+        fprintf(stderr, "[FAIL] %s: build failed\n", meta->name);
+        return 0;
+    }
+    return 1;
+}
+
+// Run the linked binary in the emulator and check its serial output against the
+// expected string. Returns 1 on pass, 0 on failure (message on stderr).
+static int execute_test(const char *repo, const TestMeta *meta, const TestPaths *paths) {
+    StringBuf run_cmd = {0};
+    char emu[PATH_MAX];
+    snprintf(emu, sizeof(emu), "%s/runtime/MyEmulator/build/myemu", repo);
+    string_buf_append(&run_cmd, "cat ");
+    shell_quote_append(&run_cmd, paths->input);
+    string_buf_append(&run_cmd, " | ");
+    shell_quote_append(&run_cmd, emu);
+    string_buf_append(&run_cmd, " -i ");
+    shell_quote_append(&run_cmd, paths->linked);
+    string_buf_append(&run_cmd, " --headless --step ");
+    string_buf_append(&run_cmd, meta->step);
+    if (meta->timer_interval[0]) {
+        string_buf_append(&run_cmd, " --timer-interval ");
+        string_buf_append(&run_cmd, meta->timer_interval);
+    }
+    string_buf_append(&run_cmd, " 2>&1");
+
+    StringBuf output = {0};
+    int run_status = capture_command(run_cmd.text, &output);
+    string_buf_free(&run_cmd);
+
+    int ok = 1;
+    if (run_status != 0) {
+        fprintf(stderr, "[FAIL] %s: emulator exited with %d\n", meta->name, run_status);
+        ok = 0;
+    } else if (meta->expect[0] && (!output.text || !strstr(output.text, meta->expect))) {
+        fprintf(stderr, "[FAIL] %s: expected output %s\n", meta->name, meta->expect);
+        ok = 0;
+    }
+    if (!ok && output.text) fprintf(stderr, "%s\n", output.text);
+    string_buf_free(&output);
+    return ok;
+}
+
 static int run_test(const char *repo, const char *test_path) {
     char abs_test[PATH_MAX];
     if (!realpath(test_path, abs_test)) {
@@ -540,115 +755,30 @@ static int run_test(const char *repo, const char *test_path) {
     char base[128];
     test_basename(abs_test, base, sizeof(base));
 
-    char source_path[PATH_MAX];
-    snprintf(source_path, sizeof(source_path), "%s", abs_test);
-    char *source_name = strrchr(source_path, '/');
-    if (source_name) {
-        source_name++;
-        snprintf(source_name, (size_t)(source_path + sizeof(source_path) - source_name),
-                 ".%s.mytest.mln", base);
-    } else {
-        snprintf(source_path, sizeof(source_path), ".%s.mytest.mln", base);
-    }
-
     TestMeta meta;
-    if (!read_metadata_and_write_source(abs_test, source_path, &meta)) {
-        return 1;
+    TestPaths paths;
+    // The generated-source path only depends on the file location, so derive it
+    // first to write the source; the build-dir paths depend on meta.name.
+    derive_paths(repo, abs_test, base, base, &paths);
+
+    int failed = 1;
+    if (!read_metadata_and_write_source(abs_test, paths.source, &meta)) {
+        // May have left a partial source file if writing failed mid-way.
+        goto cleanup;
     }
     if (meta.name[0] == '\0') snprintf(meta.name, sizeof(meta.name), "%s", base);
+    // Re-derive so build artifacts land under the (possibly custom) test name.
+    derive_paths(repo, abs_test, base, meta.name, &paths);
 
-    char build_dir[PATH_MAX];
-    char stub_path[PATH_MAX];
-    char linked_path[PATH_MAX];
-    char input_path[PATH_MAX];
-    snprintf(build_dir, sizeof(build_dir), "%s/.mytest/build/%s", repo, meta.name);
-    snprintf(stub_path, sizeof(stub_path), "%s/test_stub.masm", build_dir);
-    snprintf(linked_path, sizeof(linked_path), "%s/%s_linked.mbin", build_dir, meta.name);
-    snprintf(input_path, sizeof(input_path), "%s/stdin.txt", build_dir);
-
-    if (!ensure_dir(build_dir)) {
-        fprintf(stderr, "[FAIL] %s: cannot create build dir %s\n", meta.name, build_dir);
-        unlink(source_path);
-        return 1;
-    }
-
-    StringBuf stub = {0};
-    string_buf_append(&stub, "import { kernel_main } from ");
-    shell_quote_append(&stub, source_path);
-    string_buf_append(&stub, "\n\n__START__:\n  call kernel_main\n  halt\n");
-    for (char *p = stub.text; p && *p; p++) {
-        if (*p == '\'') *p = '"';
-    }
-    int stub_ok = write_text_file(stub_path, stub.text ? stub.text : "");
-    string_buf_free(&stub);
-    if (!stub_ok) {
-        fprintf(stderr, "[FAIL] %s: cannot write stub\n", meta.name);
-        return 1;
-    }
-    if (!write_text_file(input_path, meta.stdin_text)) {
-        fprintf(stderr, "[FAIL] %s: cannot write stdin fixture\n", meta.name);
-        return 1;
-    }
-
-    StringBuf cmd = {0};
-    string_buf_append(&cmd, "python3 ");
-    char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/qa/build_toolchain.py", repo);
-    shell_quote_append(&cmd, path);
-    string_buf_append(&cmd, " ");
-    shell_quote_append(&cmd, stub_path);
-    string_buf_append(&cmd, " ");
-    shell_quote_append(&cmd, source_path);
-    string_buf_append(&cmd, " -o ");
-    shell_quote_append(&cmd, linked_path);
-    string_buf_append(&cmd, " --build-dir ");
-    shell_quote_append(&cmd, build_dir);
-    string_buf_append(&cmd, " >/dev/null");
-
-    int build_status = run_command(cmd.text);
-    string_buf_free(&cmd);
-    unlink(source_path);
-    if (build_status != 0) {
-        fprintf(stderr, "[FAIL] %s: build failed\n", meta.name);
-        return 1;
-    }
-
-    StringBuf run_cmd = {0};
-    string_buf_append(&run_cmd, "cat ");
-    shell_quote_append(&run_cmd, input_path);
-    string_buf_append(&run_cmd, " | ");
-    snprintf(path, sizeof(path), "%s/runtime/MyEmulator/build/myemu", repo);
-    shell_quote_append(&run_cmd, path);
-    string_buf_append(&run_cmd, " -i ");
-    shell_quote_append(&run_cmd, linked_path);
-    string_buf_append(&run_cmd, " --headless --step ");
-    string_buf_append(&run_cmd, meta.step);
-    if (meta.timer_interval[0]) {
-        string_buf_append(&run_cmd, " --timer-interval ");
-        string_buf_append(&run_cmd, meta.timer_interval);
-    }
-    string_buf_append(&run_cmd, " 2>&1");
-
-    StringBuf output = {0};
-    int run_status = capture_command(run_cmd.text, &output);
-    string_buf_free(&run_cmd);
-
-    if (run_status != 0) {
-        fprintf(stderr, "[FAIL] %s: emulator exited with %d\n", meta.name, run_status);
-        if (output.text) fprintf(stderr, "%s\n", output.text);
-        string_buf_free(&output);
-        return 1;
-    }
-    if (meta.expect[0] && (!output.text || !strstr(output.text, meta.expect))) {
-        fprintf(stderr, "[FAIL] %s: expected output %s\n", meta.name, meta.expect);
-        if (output.text) fprintf(stderr, "%s\n", output.text);
-        string_buf_free(&output);
-        return 1;
-    }
+    if (!build_test(repo, &meta, &paths)) goto cleanup;
+    if (!execute_test(repo, &meta, &paths)) goto cleanup;
 
     printf("[PASS] %s\n", meta.name);
-    string_buf_free(&output);
-    return 0;
+    failed = 0;
+
+cleanup:
+    unlink(paths.source);
+    return failed;
 }
 
 static void print_usage(FILE *out) {
