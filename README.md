@@ -2,8 +2,9 @@
 
 `mytest` is the test runner for MyLang `*.test.mln` files.
 
-It discovers test files, reads `test { ... }` metadata, builds each test through the
-MyLang toolchain, runs it in MyEmulator, and checks the expected serial output.
+It discovers test files, reads top-level `test(...)` declarations, builds each test
+through the MyLang toolchain, runs it in MyEmulator, and checks the expected serial
+output.
 
 ## Build
 
@@ -18,13 +19,16 @@ make
 ./build/mytest path/to/tests/example.test.mln
 ```
 
-## Metadata
+## Test Declaration
 
 ```mylang
-test {
-    name: "serial_rx";
+import test from "libs/test.mln";
+
+test("serial_rx", {
     stdin: "PINGq";
     expect: "TEST_PASS";
     step: 10000000;
-}
+}, () => {
+    test.pass();
+});
 ```

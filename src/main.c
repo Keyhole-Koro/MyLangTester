@@ -312,6 +312,167 @@ static int parse_test_block(TestMeta *meta, char *block) {
     return 1;
 }
 
+static char *skip_ws(char *p) {
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    return p;
+}
+
+static int is_ident_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+static int is_test_keyword_at(char *source, char *p) {
+    if (strncmp(p, "test", 4) != 0) return 0;
+    if (p > source && is_ident_char(p[-1])) return 0;
+    return !is_ident_char(p[4]);
+}
+
+static char *find_matching(char *open, char open_char, char close_char) {
+    int depth = 0;
+    int in_string = 0;
+    int in_char = 0;
+    for (char *p = open; *p; p++) {
+        if (in_string) {
+            if (*p == '\\' && p[1]) p++;
+            else if (*p == '"') in_string = 0;
+            continue;
+        }
+        if (in_char) {
+            if (*p == '\\' && p[1]) p++;
+            else if (*p == '\'') in_char = 0;
+            continue;
+        }
+        if (*p == '"') in_string = 1;
+        else if (*p == '\'') in_char = 1;
+        else if (*p == open_char) depth++;
+        else if (*p == close_char) {
+            depth--;
+            if (depth == 0) return p;
+        }
+    }
+    return NULL;
+}
+
+static int append_slice(StringBuf *buf, const char *start, const char *end) {
+    if (end < start) return 0;
+    size_t len = (size_t)(end - start);
+    if (buf->len + len + 1 > buf->cap) {
+        size_t next_cap = buf->cap ? buf->cap : 256;
+        while (buf->len + len + 1 > next_cap) next_cap *= 2;
+        char *next = realloc(buf->text, next_cap);
+        if (!next) return 0;
+        buf->text = next;
+        buf->cap = next_cap;
+    }
+    memcpy(buf->text + buf->len, start, len);
+    buf->len += len;
+    buf->text[buf->len] = '\0';
+    return 1;
+}
+
+static int parse_test_declaration_and_write_source(const char *path, char *source, char *decl_start,
+                                                   const char *out_path, TestMeta *meta) {
+    char *p = skip_ws(decl_start + 4);
+    if (*p != '(') return 0;
+    p = skip_ws(p + 1);
+    if (*p != '"') {
+        fprintf(stderr, "mytest: expected test name string in %s\n", path);
+        return 0;
+    }
+
+    char *name_start = p;
+    char *name_end = p + 1;
+    while (*name_end && (*name_end != '"' || name_end[-1] == '\\')) name_end++;
+    if (*name_end != '"') {
+        fprintf(stderr, "mytest: unclosed test name in %s\n", path);
+        return 0;
+    }
+    char saved_name = name_end[1];
+    name_end[1] = '\0';
+    unquote_value(name_start, meta->name, sizeof(meta->name));
+    name_end[1] = saved_name;
+
+    p = skip_ws(name_end + 1);
+    if (*p != ',') {
+        fprintf(stderr, "mytest: expected options after test name in %s\n", path);
+        return 0;
+    }
+    p = skip_ws(p + 1);
+    if (*p != '{') {
+        fprintf(stderr, "mytest: expected options block in %s\n", path);
+        return 0;
+    }
+    char *options_start = p;
+    char *options_end = find_matching(options_start, '{', '}');
+    if (!options_end) {
+        fprintf(stderr, "mytest: unclosed test options block in %s\n", path);
+        return 0;
+    }
+    char saved_options = *options_end;
+    *options_end = '\0';
+    char *options_copy = xstrdup(options_start + 1);
+    *options_end = saved_options;
+    if (!options_copy || !parse_test_block(meta, options_copy)) {
+        free(options_copy);
+        return 0;
+    }
+    free(options_copy);
+
+    p = skip_ws(options_end + 1);
+    if (*p != ',') {
+        fprintf(stderr, "mytest: expected callback after test options in %s\n", path);
+        return 0;
+    }
+    p = skip_ws(p + 1);
+    if (*p != '(') {
+        fprintf(stderr, "mytest: expected callback parameter list in %s\n", path);
+        return 0;
+    }
+    char *params_end = find_matching(p, '(', ')');
+    if (!params_end) {
+        fprintf(stderr, "mytest: unclosed callback parameter list in %s\n", path);
+        return 0;
+    }
+    if (skip_ws(p + 1) != params_end) {
+        fprintf(stderr, "mytest: test callback must not declare parameters in %s\n", path);
+        return 0;
+    }
+    p = skip_ws(params_end + 1);
+    if (p[0] != '=' || p[1] != '>') {
+        fprintf(stderr, "mytest: expected => before test callback body in %s\n", path);
+        return 0;
+    }
+    p = skip_ws(p + 2);
+    if (*p != '{') {
+        fprintf(stderr, "mytest: expected callback body in %s\n", path);
+        return 0;
+    }
+    char *body_start = p;
+    char *body_end = find_matching(body_start, '{', '}');
+    if (!body_end) {
+        fprintf(stderr, "mytest: unclosed callback body in %s\n", path);
+        return 0;
+    }
+
+    p = skip_ws(body_end + 1);
+    if (*p != ')') {
+        fprintf(stderr, "mytest: expected ')' after test callback in %s\n", path);
+        return 0;
+    }
+    p = skip_ws(p + 1);
+    if (*p == ';') p++;
+
+    StringBuf sanitized = {0};
+    int ok = append_slice(&sanitized, source, decl_start) &&
+             string_buf_append(&sanitized, "i32 kernel_main() {\n") &&
+             append_slice(&sanitized, body_start + 1, body_end) &&
+             string_buf_append(&sanitized, "\nreturn 0;\n}\n") &&
+             string_buf_append(&sanitized, p) &&
+             write_text_file(out_path, sanitized.text ? sanitized.text : "");
+    string_buf_free(&sanitized);
+    return ok;
+}
+
 static int read_metadata_and_write_source(const char *path, const char *out_path, TestMeta *meta) {
     default_meta(meta);
     char *source = read_text_file(path);
@@ -320,58 +481,22 @@ static int read_metadata_and_write_source(const char *path, const char *out_path
         return 0;
     }
 
-    char *block_start = strstr(source, "test");
-    while (block_start) {
-        char prev = block_start == source ? '\0' : block_start[-1];
-        char next = block_start[4];
-        if ((prev == '\0' || prev == '\n' || prev == ' ' || prev == '\t') &&
-            (next == ' ' || next == '\t' || next == '{')) {
-            char *brace = block_start + 4;
-            while (*brace == ' ' || *brace == '\t' || *brace == '\r' || *brace == '\n') brace++;
-            if (*brace == '{') {
-                char *block_body = brace + 1;
-                char *block_end = strchr(block_body, '}');
-                if (!block_end) {
-                    fprintf(stderr, "mytest: unclosed test metadata block in %s\n", path);
-                    free(source);
-                    return 0;
-                }
-
-                char saved = *block_end;
-                *block_end = '\0';
-                char *copy = xstrdup(block_body);
-                *block_end = saved;
-                if (!copy || !parse_test_block(meta, copy)) {
-                    free(copy);
-                    free(source);
-                    return 0;
-                }
-                free(copy);
-
-                StringBuf sanitized = {0};
-                size_t prefix_len = (size_t)(block_start - source);
-                char *prefix = malloc(prefix_len + 1);
-                if (!prefix) {
-                    free(source);
-                    return 0;
-                }
-                memcpy(prefix, source, prefix_len);
-                prefix[prefix_len] = '\0';
-                string_buf_append(&sanitized, prefix);
-                free(prefix);
-                string_buf_append(&sanitized, block_end + 1);
-                int ok = write_text_file(out_path, sanitized.text ? sanitized.text : "");
-                string_buf_free(&sanitized);
+    char *decl_start = strstr(source, "test");
+    while (decl_start) {
+        if (is_test_keyword_at(source, decl_start)) {
+            char *after = skip_ws(decl_start + 4);
+            if (*after == '(') {
+                int ok = parse_test_declaration_and_write_source(path, source, decl_start, out_path, meta);
                 free(source);
                 return ok;
             }
         }
-        block_start = strstr(block_start + 4, "test");
+        decl_start = strstr(decl_start + 4, "test");
     }
 
-    int ok = write_text_file(out_path, source);
+    fprintf(stderr, "mytest: missing top-level test declaration in %s\n", path);
     free(source);
-    return ok;
+    return 0;
 }
 
 static int find_repo_root(char *out, size_t out_size) {
