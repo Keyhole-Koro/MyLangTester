@@ -1,15 +1,17 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -Wno-format-truncation -std=c11
+JAVAC = javac
 
-SRC = $(shell find src -name '*.c' | sort)
+SRC = $(shell find src -name '*.java' | sort)
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/mytest
+CLASSES = $(BUILD_DIR)/classes
 
 all: $(TARGET)
 
 $(TARGET): $(SRC)
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -o $@ $^
+	@mkdir -p $(CLASSES)
+	$(JAVAC) -d $(CLASSES) $^
+	@printf '%s\n' '#!/bin/sh' 'SCRIPT_DIR=$$(CDPATH= cd -- "$$(dirname -- "$$0")" && pwd)' 'exec java -cp "$$SCRIPT_DIR/classes" Main "$$@"' > $@
+	@chmod +x $@
 
 clean:
 	rm -rf $(BUILD_DIR)

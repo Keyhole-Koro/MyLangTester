@@ -8,6 +8,8 @@ output.
 
 ## Build
 
+Requires JDK 11 or newer with `javac` and `java` on `PATH`.
+
 ```bash
 make
 ```
