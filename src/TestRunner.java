@@ -79,7 +79,7 @@ public final class TestRunner {
     private static boolean executeTest(Path repo, TestMeta meta, TestPaths paths)
             throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
-        command.add(repo.resolve("runtime/MyEmulator/build/myemu").toString());
+        command.add(repo.resolve("runtime/MyEmulator/target/release/myemu").toString());
         command.add("-i");
         command.add(paths.linked.toString());
         command.add("--headless");
