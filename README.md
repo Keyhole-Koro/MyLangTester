@@ -34,3 +34,18 @@ test("serial_rx", {
     test.pass();
 });
 ```
+
+## Generated Source
+
+The test body is rewritten into a `kernel_main` and written next to the test file
+as `<stem>_gen_test[.modifiers].mln`, then deleted once the run finishes. mlc reads
+the source profile out of the filename, so the modifiers are carried over and the
+marker is joined with an underscore:
+
+| test file | generated source |
+| --- | --- |
+| `serial_rx.test.mln` | `serial_rx_gen_test.mln` |
+| `dom_lowering.dom.test.mln` | `dom_lowering_gen_test.dom.mln` |
+
+A `.dom.test.mln` test therefore keeps DOM syntax, and imports resolve as they do
+from the test file itself because the generated source is its sibling.

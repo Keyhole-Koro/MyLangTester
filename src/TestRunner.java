@@ -24,14 +24,14 @@ public final class TestRunner {
     public static boolean run(Path repo, Path testPath) throws IOException, InterruptedException {
         Path absTest = testPath.toRealPath();
         String base = testBasename(absTest);
-        TestPaths paths = derivePaths(repo, absTest, base, base);
+        TestPaths paths = derivePaths(repo, absTest, base);
 
         try {
             TestMeta meta = TestParser.readMetadataAndWriteSource(absTest, paths.source);
             if (meta.name.isEmpty()) {
                 meta.name = base;
             }
-            paths = derivePaths(repo, absTest, base, meta.name);
+            paths = derivePaths(repo, absTest, meta.name);
 
             if (!buildTest(repo, meta, paths)) {
                 return false;
@@ -132,8 +132,30 @@ public final class TestRunner {
         return base.replaceAll("[/ \\t.]", "_");
     }
 
-    private static TestPaths derivePaths(Path repo, Path absTest, String base, String name) {
-        Path source = absTest.resolveSibling("." + base + ".mytest.mln");
+    /**
+     * Filename of the generated MyLang source, written next to the test file.
+     *
+     * mlc reads the source profile out of the filename, so the name must be a
+     * stem followed only by modifiers it knows (`dom`, `safe`). The marker is
+     * glued on with an underscore and the modifiers are carried over:
+     * `serial_rx.test.mln` -> `serial_rx_gen_test.mln`,
+     * `dom_lowering.dom.test.mln` -> `dom_lowering_gen_test.dom.mln`.
+     */
+    private static String generatedSourceName(Path absTest) {
+        String base = absTest.getFileName().toString();
+        if (base.endsWith(".test.mln")) {
+            base = base.substring(0, base.length() - ".test.mln".length());
+        } else if (base.endsWith(".mln")) {
+            base = base.substring(0, base.length() - ".mln".length());
+        }
+        int dot = base.indexOf('.');
+        String stem = dot < 0 ? base : base.substring(0, dot);
+        String modifiers = dot < 0 ? "" : base.substring(dot);
+        return stem.replaceAll("[/ \\t]", "_") + "_gen_test" + modifiers + ".mln";
+    }
+
+    private static TestPaths derivePaths(Path repo, Path absTest, String name) {
+        Path source = absTest.resolveSibling(generatedSourceName(absTest));
         Path buildDir = repo.resolve(".mytest/build").resolve(name);
         return new TestPaths(
                 source,
