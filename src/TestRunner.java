@@ -14,11 +14,11 @@ public final class TestRunner {
     public static Path findRepoRoot() throws IOException {
         Path cwd = Path.of("").toAbsolutePath();
         for (Path dir = cwd; dir != null; dir = dir.getParent()) {
-            if (Files.isReadable(dir.resolve("qa/build_toolchain.py"))) {
+            if (Files.isReadable(dir.resolve("qa/runners/build_toolchain.py"))) {
                 return dir;
             }
         }
-        throw new IOException("mytest: could not find repo root containing qa/build_toolchain.py");
+        throw new IOException("mytest: could not find repo root containing qa/runners/build_toolchain.py");
     }
 
     public static boolean run(Path repo, Path testPath) throws IOException, InterruptedException {
@@ -60,7 +60,7 @@ public final class TestRunner {
 
         List<String> command = List.of(
                 "python3",
-                repo.resolve("qa/build_toolchain.py").toString(),
+                repo.resolve("qa/runners/build_toolchain.py").toString(),
                 paths.stub.toString(),
                 paths.source.toString(),
                 "-o",
