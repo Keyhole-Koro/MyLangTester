@@ -130,6 +130,8 @@ public final class TestRunner {
         List<Path> sources = List.of(
                 root.resolve("runtime/abi.mln"),
                 root.resolve("runtime/verdict.mln"),
+                root.resolve("runtime/matcher.mln"),
+                root.resolve("runtime/return_sequence.mln"),
                 root.resolve("platform/mycomputer/verdict.mln"));
         for (Path source : sources) {
             if (!Files.isRegularFile(source)) {
