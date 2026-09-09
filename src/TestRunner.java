@@ -133,6 +133,7 @@ public final class TestRunner {
                 root.resolve("runtime/matcher.mln"),
                 root.resolve("runtime/return_sequence.mln"),
                 root.resolve("runtime/history.mln"),
+                root.resolve("runtime/mock.mln"),
                 root.resolve("platform/mycomputer/verdict.mln"));
         for (Path source : sources) {
             if (!Files.isRegularFile(source)) {
