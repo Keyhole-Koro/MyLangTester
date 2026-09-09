@@ -193,7 +193,7 @@ public final class TestRunner {
      */
     private static String mockEntryAssembly(List<String> targets) {
         StringBuilder out = new StringBuilder();
-        out.append("import { mock_mock_active_target, mock_mock_result, mock_dispatch, ")
+        out.append("import { mock_mock_active_target, mock_mock_result, mock_record, mock_dispatch, ")
                 .append("mock_should_call_original, mock_unexpected");
         for (String target : targets) out.append(", ").append(target);
         out.append(" }\n");
@@ -214,6 +214,10 @@ public final class TestRunner {
                     .append("  push r5\n  push r6\n  push r7\n")
                     .append("  movi r1, ").append(target).append("\n")
                     .append("  movi r2, mock_mock_active_target\n  store r2, r1\n")
+                    .append("  call mock_record\n")
+                    .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
                     .append("  call mock_dispatch\n  cmp r1, 0\n  jz ").append(miss).append("\n")
                     .append("  movi r2, mock_mock_result\n  load r1, r2\n  jmp ").append(done).append("\n")
                     .append(miss).append(":\n")
