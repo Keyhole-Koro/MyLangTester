@@ -6,6 +6,16 @@ It discovers test files, reads top-level `test(...)` declarations, builds each t
 through the MyLang toolchain, runs it in MyEmulator, and checks the expected serial
 output.
 
+## TestKit runtime
+
+New tests are linked with `toolchain/MyLangTestKit` automatically.  A normal
+test-body return emits `TEST_PASS:<name>`, and `MyStdLib/assert.mln` failures
+emit `TEST_FAIL:<reason>` through the TestKit `assert_fail` hook.
+
+Tests which still import the legacy kernel-local `libs/test.mln` keep their
+existing runtime during the migration, so their local `assert_fail` definition
+does not conflict with TestKit.
+
 ## Build
 
 Requires JDK 11 or newer with `javac` and `java` on `PATH`.

@@ -7,16 +7,54 @@ public final class TestParser {
     private TestParser() {
     }
 
-    public static TestMeta readMetadataAndWriteSource(Path path, Path outPath) throws IOException {
+    public static TestMeta readMetadataAndWriteSource(Path path, Path outPath, boolean useTestKit)
+            throws IOException {
         String source = Files.readString(path, StandardCharsets.UTF_8);
         ParsedTest test = parseTestSource(path, source);
-        String generated = source.substring(0, test.declStart)
-                + "i32 kernel_main() {\n"
-                + source.substring(test.bodyStart + 1, test.bodyEnd)
-                + "\nreturn 0;\n}\n"
-                + source.substring(test.tail);
+        String generated;
+        if (useTestKit) {
+            String testName = test.meta.name.isEmpty() ? defaultTestName(path) : test.meta.name;
+            generated = source.substring(0, test.declStart)
+                    + "extern void testkit_pass(char* name);\n\n"
+                    + "extern void __mlt_require_abi_v1();\n\n"
+                    + "i32 __mlt_test_body() {\n"
+                    + source.substring(test.bodyStart + 1, test.bodyEnd)
+                    + "\nreturn 0;\n}\n\n"
+                    + "i32 kernel_main() {\n"
+                    + "__mlt_require_abi_v1();\n"
+                    + "__mlt_test_body();\n"
+                    + "testkit_pass(\"" + escapeString(testName) + "\");\n"
+                    + "return 0;\n}\n"
+                    + source.substring(test.tail);
+        } else {
+            generated = source.substring(0, test.declStart)
+                    + "i32 kernel_main() {\n"
+                    + source.substring(test.bodyStart + 1, test.bodyEnd)
+                    + "\nreturn 0;\n}\n"
+                    + source.substring(test.tail);
+        }
         Files.writeString(outPath, generated, StandardCharsets.UTF_8);
         return test.meta;
+    }
+
+    /**
+     * Existing tests which import the old kernel-local test library supply
+     * their own bare assert_fail hook.  They remain compatible while new
+     * tests use the TestKit-provided hook.
+     */
+    public static boolean usesLegacyTestRuntime(Path path) throws IOException {
+        return Files.readString(path, StandardCharsets.UTF_8).contains("libs/test.mln");
+    }
+
+    private static String defaultTestName(Path path) {
+        String name = path.getFileName().toString();
+        return name.endsWith(".test.mln")
+                ? name.substring(0, name.length() - ".test.mln".length())
+                : name;
+    }
+
+    private static String escapeString(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static ParsedTest parseTestSource(Path path, String source) throws IOException {

@@ -2,6 +2,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -25,18 +26,23 @@ public final class TestRunner {
         Path absTest = testPath.toRealPath();
         String base = testBasename(absTest);
         TestPaths paths = derivePaths(repo, absTest, base);
+        boolean useTestKit = !TestParser.usesLegacyTestRuntime(absTest);
 
         try {
-            TestMeta meta = TestParser.readMetadataAndWriteSource(absTest, paths.source);
+            TestMeta meta = TestParser.readMetadataAndWriteSource(absTest, paths.source, useTestKit);
             if (meta.name.isEmpty()) {
                 meta.name = base;
             }
-            paths = derivePaths(repo, absTest, meta.name);
+            TestPaths namedPaths = derivePaths(repo, absTest, meta.name);
+            if (!paths.source.equals(namedPaths.source)) {
+                Files.move(paths.source, namedPaths.source, StandardCopyOption.REPLACE_EXISTING);
+            }
+            paths = namedPaths;
 
-            if (!buildTest(repo, meta, paths)) {
+            if (!buildTest(repo, meta, paths, useTestKit)) {
                 return false;
             }
-            if (!executeTest(repo, meta, paths)) {
+            if (!executeTest(repo, meta, paths, useTestKit)) {
                 return false;
             }
             System.out.printf("[PASS] %s%n", meta.name);
@@ -46,7 +52,7 @@ public final class TestRunner {
         }
     }
 
-    private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths)
+    private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths, boolean useTestKit)
             throws IOException, InterruptedException {
         Files.createDirectories(paths.buildDir);
 
@@ -58,15 +64,20 @@ public final class TestRunner {
         Files.writeString(paths.stub, stub, StandardCharsets.UTF_8);
         Files.writeString(paths.input, meta.stdinText, StandardCharsets.UTF_8);
 
-        List<String> command = List.of(
-                "python3",
-                repo.resolve("qa/runners/build_toolchain.py").toString(),
-                paths.stub.toString(),
-                paths.source.toString(),
-                "-o",
-                paths.linked.toString(),
-                "--build-dir",
-                paths.buildDir.toString());
+        List<String> command = new ArrayList<>();
+        command.add("python3");
+        command.add(repo.resolve("qa/runners/build_toolchain.py").toString());
+        command.add(paths.stub.toString());
+        command.add(paths.source.toString());
+        if (useTestKit) {
+            for (Path source : testKitSources(repo)) {
+                command.add(source.toString());
+            }
+        }
+        command.add("-o");
+        command.add(paths.linked.toString());
+        command.add("--build-dir");
+        command.add(paths.buildDir.toString());
 
         int status = runQuiet(command);
         if (status != 0) {
@@ -76,7 +87,7 @@ public final class TestRunner {
         return true;
     }
 
-    private static boolean executeTest(Path repo, TestMeta meta, TestPaths paths)
+    private static boolean executeTest(Path repo, TestMeta meta, TestPaths paths, boolean useTestKit)
             throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
         command.add(repo.resolve("runtime/MyEmulator/target/release/myemu").toString());
@@ -91,8 +102,18 @@ public final class TestRunner {
         }
 
         CommandResult result = capture(command, paths.input);
+        String failure = verdictReason(result.output, "TEST_FAIL:");
+        if (failure != null) {
+            System.err.printf("[FAIL] %s: %s%n", meta.name, failure);
+            return false;
+        }
         if (result.status != 0) {
             System.err.printf("[FAIL] %s: emulator exited with %d%n", meta.name, result.status);
+            System.err.println(result.output);
+            return false;
+        }
+        if (useTestKit && !result.output.contains("TEST_PASS:")) {
+            System.err.printf("[FAIL] %s: no test verdict%n", meta.name);
             System.err.println(result.output);
             return false;
         }
@@ -102,6 +123,30 @@ public final class TestRunner {
             return false;
         }
         return true;
+    }
+
+    private static List<Path> testKitSources(Path repo) throws IOException {
+        Path root = repo.resolve("toolchain/MyLangTestKit");
+        List<Path> sources = List.of(
+                root.resolve("runtime/abi.mln"),
+                root.resolve("runtime/verdict.mln"),
+                root.resolve("platform/mycomputer/verdict.mln"));
+        for (Path source : sources) {
+            if (!Files.isRegularFile(source)) {
+                throw new IOException("mytest: missing MyLangTestKit source " + source);
+            }
+        }
+        return sources;
+    }
+
+    private static String verdictReason(String output, String marker) {
+        int start = output.indexOf(marker);
+        if (start < 0) {
+            return null;
+        }
+        int end = output.indexOf('\n', start);
+        String line = end < 0 ? output.substring(start) : output.substring(start, end);
+        return line.trim();
     }
 
     private static int runQuiet(List<String> command) throws IOException, InterruptedException {
