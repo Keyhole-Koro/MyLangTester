@@ -32,6 +32,35 @@ public final class TestRunner {
 
     public static boolean run(Path repo, Path testPath) throws IOException, InterruptedException {
         Path absTest = testPath.toRealPath();
+        List<TestMeta> annotatedTests = TestParser.readAnnotatedTests(absTest);
+        if (!annotatedTests.isEmpty()) {
+            boolean passed = true;
+            for (TestMeta meta : annotatedTests) {
+                if (!runAnnotated(repo, absTest, meta)) passed = false;
+            }
+            return passed;
+        }
+        return runLegacy(repo, absTest);
+    }
+
+    private static boolean runAnnotated(Path repo, Path absTest, TestMeta meta)
+            throws IOException, InterruptedException {
+        TestPaths paths = derivePaths(repo, absTest, meta.name);
+        boolean useTestKit = !TestParser.usesLegacyTestRuntime(absTest);
+        List<String> mockTargets = useTestKit ? discoverMockTargets(absTest, meta) : List.of();
+
+        try {
+            TestParser.writeAnnotatedHarness(absTest, paths.source, meta, useTestKit);
+            if (!buildTest(repo, meta, paths, useTestKit, mockTargets)) return false;
+            if (!executeTest(repo, meta, paths, useTestKit)) return false;
+            System.out.printf("[PASS] %s%n", meta.name);
+            return true;
+        } finally {
+            Files.deleteIfExists(paths.source);
+        }
+    }
+
+    private static boolean runLegacy(Path repo, Path absTest) throws IOException, InterruptedException {
         String base = testBasename(absTest);
         TestPaths paths = derivePaths(repo, absTest, base);
         boolean useTestKit = !TestParser.usesLegacyTestRuntime(absTest);
@@ -176,6 +205,18 @@ public final class TestRunner {
 
     private static List<String> discoverMockTargets(Path source) throws IOException {
         String text = Files.readString(source, StandardCharsets.UTF_8);
+        return discoverMockTargets(text);
+    }
+
+    private static List<String> discoverMockTargets(Path source, TestMeta meta) throws IOException {
+        String text = Files.readString(source, StandardCharsets.UTF_8);
+        if (meta.bodyStart < 0 || meta.bodyEnd <= meta.bodyStart || meta.bodyEnd > text.length()) {
+            throw new IOException("mytest: invalid @Test body range for " + meta.name);
+        }
+        return discoverMockTargets(text.substring(meta.bodyStart, meta.bodyEnd + 1));
+    }
+
+    private static List<String> discoverMockTargets(String text) {
         Set<String> targets = new LinkedHashSet<>();
         Matcher matcher = MOCK_TARGET.matcher(text);
         while (matcher.find()) {

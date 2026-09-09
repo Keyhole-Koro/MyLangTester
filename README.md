@@ -2,9 +2,9 @@
 
 `mytest` is the test runner for MyLang `*.test.mln` files.
 
-It discovers test files, reads top-level `test(...)` declarations, builds each test
-through the MyLang toolchain, runs it in MyEmulator, and checks the expected serial
-output.
+It discovers test files, reads `/*@Test*/` pragmas attached to ordinary
+top-level functions, builds each case through the MyLang toolchain, runs it in
+MyEmulator, and checks the expected serial output.
 
 ## TestKit runtime
 
@@ -60,21 +60,33 @@ make
 ```mylang
 import test from "libs/test.mln";
 
-test("serial_rx", {
+/*@Test "serial_rx" {
     stdin: "PINGq";
     expect: "TEST_PASS";
     step: 10000000;
-}, () => {
+}*/
+void serial_rx() {
     test.pass();
-});
+}
 ```
+
+The name is required. The optional block retains the existing `key: value;`
+metadata, including `stdin`, `expect`, `step`, and `timer_interval`.
+`mytest --list` prints every annotated case as `<file>::<name>`. Multiple
+annotated functions in one file are built and run independently, so their
+TestKit Mock, Spy, and call-history state cannot leak into another case.
+
+The legacy top-level `test(...)` declaration is still supported during the
+migration, but new tests should use `/*@Test*/`.
 
 ## Generated Source
 
-The test body is rewritten into a `kernel_main` and written next to the test file
-as `<stem>_gen_test[.modifiers].mln`, then deleted once the run finishes. mlc reads
-the source profile out of the filename, so the modifiers are carried over and the
-marker is joined with an underscore:
+For an annotated test, the function body is never rewritten. `mytest` writes a
+small `kernel_main` harness next to the test file, imports the annotated
+function, calls it, and emits the TestKit pass verdict on normal return. The
+harness is deleted once the run finishes. mlc reads the source profile out of
+the filename, so modifiers are carried over and the marker is joined with an
+underscore:
 
 | test file | generated source |
 | --- | --- |
@@ -82,4 +94,5 @@ marker is joined with an underscore:
 | `dom_lowering.dom.test.mln` | `dom_lowering_gen_test.dom.mln` |
 
 A `.dom.test.mln` test therefore keeps DOM syntax, and imports resolve as they do
-from the test file itself because the generated source is its sibling.
+from the test file itself because the generated harness is its sibling. Legacy
+`test(...)` files still use the older body-rewriting harness until migrated.
