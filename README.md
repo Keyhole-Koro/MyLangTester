@@ -16,6 +16,27 @@ Tests which still import the legacy kernel-local `libs/test.mln` keep their
 existing runtime during the migration, so their local `assert_fail` definition
 does not conflict with TestKit.
 
+## Mock and Spy
+
+TestKit-backed tests can intercept a direct function call without changing
+production code:
+
+```mylang
+import mock from "path/to/MyLangTestKit/runtime/facade.mln";
+
+mock.spy(ssd.read_block)
+    .when(2, mock.any())
+    .ret(-1);
+```
+
+`mock.of(target)` requires a configured matching rule; an unmatched call fails
+the test. `mock.spy(target)` uses the original implementation when no rule
+matches. `ret(value).then_ret(next)` supplies successive return values.
+The initial facade matches up to three word-sized scalar or pointer arguments
+and returns one word. `mytest` discovers the targets, creates the entry
+functions, and passes the redirects through MLC and the linker, including for
+calls within the same source module.
+
 ## Build
 
 Requires JDK 11 or newer with `javac` and `java` on `PATH`.

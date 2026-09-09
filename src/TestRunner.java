@@ -6,9 +6,17 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class TestRunner {
+    private static final Pattern MOCK_TARGET = Pattern.compile(
+            "\\bmock\\s*\\.\\s*(?:of|spy)\\s*\\(\\s*"
+                    + "([A-Za-z_][A-Za-z0-9_]*(?:\\s*\\.\\s*[A-Za-z_][A-Za-z0-9_]*)*)\\s*\\)");
+
     private TestRunner() {
     }
 
@@ -27,6 +35,7 @@ public final class TestRunner {
         String base = testBasename(absTest);
         TestPaths paths = derivePaths(repo, absTest, base);
         boolean useTestKit = !TestParser.usesLegacyTestRuntime(absTest);
+        List<String> mockTargets = useTestKit ? discoverMockTargets(absTest) : List.of();
 
         try {
             TestMeta meta = TestParser.readMetadataAndWriteSource(absTest, paths.source, useTestKit);
@@ -39,7 +48,7 @@ public final class TestRunner {
             }
             paths = namedPaths;
 
-            if (!buildTest(repo, meta, paths, useTestKit)) {
+            if (!buildTest(repo, meta, paths, useTestKit, mockTargets)) {
                 return false;
             }
             if (!executeTest(repo, meta, paths, useTestKit)) {
@@ -52,7 +61,8 @@ public final class TestRunner {
         }
     }
 
-    private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths, boolean useTestKit)
+    private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths, boolean useTestKit,
+                                     List<String> mockTargets)
             throws IOException, InterruptedException {
         Files.createDirectories(paths.buildDir);
 
@@ -63,12 +73,18 @@ public final class TestRunner {
                 + "  halt\n";
         Files.writeString(paths.stub, stub, StandardCharsets.UTF_8);
         Files.writeString(paths.input, meta.stdinText, StandardCharsets.UTF_8);
+        if (!mockTargets.isEmpty()) {
+            Files.writeString(paths.mockFacade, mockEntryAssembly(mockTargets), StandardCharsets.UTF_8);
+        }
 
         List<String> command = new ArrayList<>();
         command.add("python3");
         command.add(repo.resolve("qa/runners/build_toolchain.py").toString());
         command.add(paths.stub.toString());
         command.add(paths.source.toString());
+        if (!mockTargets.isEmpty()) {
+            command.add(paths.mockFacade.toString());
+        }
         if (useTestKit) {
             for (Path source : testKitSources(repo)) {
                 command.add(source.toString());
@@ -78,6 +94,10 @@ public final class TestRunner {
         command.add(paths.linked.toString());
         command.add("--build-dir");
         command.add(paths.buildDir.toString());
+        for (String target : mockTargets) {
+            command.add("--redirect");
+            command.add(target + "=__mlt_entry_" + target);
+        }
 
         int status = runQuiet(command);
         if (status != 0) {
@@ -134,6 +154,7 @@ public final class TestRunner {
                 root.resolve("runtime/return_sequence.mln"),
                 root.resolve("runtime/history.mln"),
                 root.resolve("runtime/mock.mln"),
+                root.resolve("runtime/facade.mln"),
                 root.resolve("platform/mycomputer/verdict.mln"));
         for (Path source : sources) {
             if (!Files.isRegularFile(source)) {
@@ -151,6 +172,63 @@ public final class TestRunner {
         int end = output.indexOf('\n', start);
         String line = end < 0 ? output.substring(start) : output.substring(start, end);
         return line.trim();
+    }
+
+    private static List<String> discoverMockTargets(Path source) throws IOException {
+        String text = Files.readString(source, StandardCharsets.UTF_8);
+        Set<String> targets = new LinkedHashSet<>();
+        Matcher matcher = MOCK_TARGET.matcher(text);
+        while (matcher.find()) {
+            String target = matcher.group(1).replaceAll("\\s+", "").replace('.', '_');
+            targets.add(target);
+        }
+        return List.copyOf(targets);
+    }
+
+    /**
+     * One entry is emitted for every configured target. The entry preserves
+     * the normal r5-r7 ABI, asks the TestKit facade for a configured return,
+     * and calls the original only for an unmatched Spy. Linker redirect logic
+     * deliberately leaves this object's original call untouched.
+     */
+    private static String mockEntryAssembly(List<String> targets) {
+        StringBuilder out = new StringBuilder();
+        out.append("import { mock_mock_active_target, mock_mock_result, mock_dispatch, ")
+                .append("mock_should_call_original, mock_unexpected");
+        for (String target : targets) out.append(", ").append(target);
+        out.append(" }\n");
+        // MyAssembler accepts declarations before the first label only.
+        for (String target : targets) {
+            out.append("export __mlt_entry_").append(target).append("\n");
+        }
+        for (int slot = 0; slot < targets.size(); slot++) {
+            String target = targets.get(slot);
+            String entry = "__mlt_entry_" + target;
+            String miss = entry + "_miss";
+            String unexpected = entry + "_unexpected";
+            String done = entry + "_done";
+            out.append(entry).append(":\n")
+                    .append("  push lr\n  push bp\n  mov bp, sp\n")
+                    // dispatch and the miss policy are ordinary calls, so
+                    // preserve the target ABI arguments for Spy fallback.
+                    .append("  push r5\n  push r6\n  push r7\n")
+                    .append("  movi r1, ").append(target).append("\n")
+                    .append("  movi r2, mock_mock_active_target\n  store r2, r1\n")
+                    .append("  call mock_dispatch\n  cmp r1, 0\n  jz ").append(miss).append("\n")
+                    .append("  movi r2, mock_mock_result\n  load r1, r2\n  jmp ").append(done).append("\n")
+                    .append(miss).append(":\n")
+                    .append("  call mock_should_call_original\n  cmp r1, 0\n  jz ")
+                    .append(unexpected).append("\n")
+                    .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
+                    .append("  call ").append(target).append("\n  jmp ").append(done).append("\n")
+                    .append(unexpected).append(":\n")
+                    .append("  call mock_unexpected\n")
+                    .append(done).append(":\n")
+                    .append("  mov sp, bp\n  pop bp\n  pop lr\n  mov pc, lr\n\n");
+        }
+        return out.toString();
     }
 
     private static int runQuiet(List<String> command) throws IOException, InterruptedException {
@@ -210,6 +288,7 @@ public final class TestRunner {
                 source,
                 buildDir,
                 buildDir.resolve("test_stub.masm"),
+                buildDir.resolve("mock_entries.masm"),
                 buildDir.resolve(name + "_linked.mbin"),
                 buildDir.resolve("stdin.txt"));
     }
@@ -218,13 +297,15 @@ public final class TestRunner {
         final Path source;
         final Path buildDir;
         final Path stub;
+        final Path mockFacade;
         final Path linked;
         final Path input;
 
-        TestPaths(Path source, Path buildDir, Path stub, Path linked, Path input) {
+        TestPaths(Path source, Path buildDir, Path stub, Path mockFacade, Path linked, Path input) {
             this.source = source;
             this.buildDir = buildDir;
             this.stub = stub;
+            this.mockFacade = mockFacade;
             this.linked = linked;
             this.input = input;
         }
