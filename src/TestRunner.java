@@ -257,9 +257,15 @@ public final class TestRunner {
 
     /**
      * One entry is emitted for every configured target. The entry preserves
-     * the normal six-word ABI (r5-r7 plus three stack words), asks the TestKit facade for a configured return
-     * or fake callback, and calls the original only for an unmatched Spy. Linker redirect logic
-     * deliberately leaves this object's original call untouched.
+     * the normal six-word ABI (r5-r7 plus three stack words) and r4, which is
+     * the hidden destination pointer for a struct/array return. This lets the
+     * same target-agnostic entry forward aggregate-returning calls to either a
+     * fake callback or the original Spy implementation. The facade still only
+     * stores word-sized values for `.ret(...)`; aggregate targets therefore
+     * use `.call(fake)`.
+     *
+     * Linker redirect logic deliberately leaves this object's original call
+     * untouched.
      */
     private static String mockEntryAssembly(List<String> targets) {
         StringBuilder out = new StringBuilder();
@@ -283,21 +289,27 @@ public final class TestRunner {
                     .append("  push lr\n  push bp\n  mov bp, sp\n")
                     // dispatch and the miss policy are ordinary calls, so
                     // preserve the target ABI arguments for Spy fallback.
-                    .append("  push r5\n  push r6\n  push r7\n")
+                    // r4 is an otherwise caller-clobbered register, except
+                    // for a target returning an aggregate: then it carries
+                    // that target's hidden result buffer. Preserve it for
+                    // every target so the generated entry need not duplicate
+                    // the compiler's type/ABI analysis.
+                    .append("  push r4\n  push r5\n  push r6\n  push r7\n")
                     .append("  movi r1, ").append(target).append("\n")
                     .append("  movi r2, mock_mock_active_target\n  store r2, r1\n")
                     .append(stackArgsFromEntry())
                     .append("  call mock_record\n  addis sp, 12\n")
-                    .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
-                    .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
-                    .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -8\n  load r5, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -12\n  load r6, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -16\n  load r7, r2\n")
                     .append(stackArgsFromEntry())
                     .append("  call mock_dispatch\n  addis sp, 12\n  cmp r1, 0\n  jz ").append(miss).append("\n")
                     .append("  movi r2, mock_mock_callback\n  load r2, r2\n  cmp r2, 0\n  jz ")
                     .append(configuredReturn).append("\n")
-                    .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
-                    .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
-                    .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -4\n  load r4, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -8\n  load r5, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -12\n  load r6, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -16\n  load r7, r2\n")
                     .append(stackArgsFromEntry())
                     .append("  movi r2, mock_mock_callback\n  load r2, r2\n")
                     .append("  movi lr, ").append(callbackReturn).append("\n  mov pc, r2\n")
@@ -307,9 +319,10 @@ public final class TestRunner {
                     .append(miss).append(":\n")
                     .append("  call mock_should_call_original\n  cmp r1, 0\n  jz ")
                     .append(unexpected).append("\n")
-                    .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
-                    .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
-                    .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -4\n  load r4, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -8\n  load r5, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -12\n  load r6, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -16\n  load r7, r2\n")
                     .append(stackArgsFromEntry())
                     .append("  call ").append(target).append("\n  addis sp, 12\n  jmp ").append(done).append("\n")
                     .append(unexpected).append(":\n")
