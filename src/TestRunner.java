@@ -257,13 +257,13 @@ public final class TestRunner {
 
     /**
      * One entry is emitted for every configured target. The entry preserves
-     * the normal r5-r7 ABI, asks the TestKit facade for a configured return,
-     * and calls the original only for an unmatched Spy. Linker redirect logic
+     * the normal r5-r7 ABI, asks the TestKit facade for a configured return
+     * or fake callback, and calls the original only for an unmatched Spy. Linker redirect logic
      * deliberately leaves this object's original call untouched.
      */
     private static String mockEntryAssembly(List<String> targets) {
         StringBuilder out = new StringBuilder();
-        out.append("import { mock_mock_active_target, mock_mock_result, mock_record, mock_dispatch, ")
+        out.append("import { mock_mock_active_target, mock_mock_result, mock_mock_callback, mock_record, mock_dispatch, ")
                 .append("mock_should_call_original, mock_unexpected");
         for (String target : targets) out.append(", ").append(target);
         out.append(" }\n");
@@ -275,6 +275,8 @@ public final class TestRunner {
             String target = targets.get(slot);
             String entry = "__mlt_entry_" + target;
             String miss = entry + "_miss";
+            String configuredReturn = entry + "_return";
+            String callbackReturn = entry + "_callback_return";
             String unexpected = entry + "_unexpected";
             String done = entry + "_done";
             out.append(entry).append(":\n")
@@ -289,6 +291,15 @@ public final class TestRunner {
                     .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
                     .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
                     .append("  call mock_dispatch\n  cmp r1, 0\n  jz ").append(miss).append("\n")
+                    .append("  movi r2, mock_mock_callback\n  load r2, r2\n  cmp r2, 0\n  jz ")
+                    .append(configuredReturn).append("\n")
+                    .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
+                    .append("  movi r2, mock_mock_callback\n  load r2, r2\n")
+                    .append("  movi lr, ").append(callbackReturn).append("\n  mov pc, r2\n")
+                    .append(callbackReturn).append(":\n  jmp ").append(done).append("\n")
+                    .append(configuredReturn).append(":\n")
                     .append("  movi r2, mock_mock_result\n  load r1, r2\n  jmp ").append(done).append("\n")
                     .append(miss).append(":\n")
                     .append("  call mock_should_call_original\n  cmp r1, 0\n  jz ")
