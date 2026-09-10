@@ -186,6 +186,7 @@ public final class TestRunner {
         Path root = repo.resolve("toolchain/MyLangTestKit");
         List<Path> sources = List.of(
                 root.resolve("runtime/abi.mln"),
+                root.resolve("runtime/testkit.mln"),
                 root.resolve("runtime/verdict.mln"),
                 root.resolve("runtime/matcher.mln"),
                 root.resolve("runtime/return_sequence.mln"),
