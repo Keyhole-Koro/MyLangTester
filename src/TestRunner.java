@@ -46,7 +46,7 @@ public final class TestRunner {
     private static boolean runAnnotated(Path repo, Path absTest, TestMeta meta)
             throws IOException, InterruptedException {
         TestPaths paths = derivePaths(repo, absTest, meta.name);
-        boolean useTestKit = !TestParser.usesLegacyTestRuntime(absTest);
+        boolean useTestKit = true;
         List<String> mockTargets = useTestKit ? discoverMockTargets(absTest, meta) : List.of();
 
         try {
@@ -63,7 +63,7 @@ public final class TestRunner {
     private static boolean runLegacy(Path repo, Path absTest) throws IOException, InterruptedException {
         String base = testBasename(absTest);
         TestPaths paths = derivePaths(repo, absTest, base);
-        boolean useTestKit = !TestParser.usesLegacyTestRuntime(absTest);
+        boolean useTestKit = true;
         List<String> mockTargets = useTestKit ? discoverMockTargets(absTest) : List.of();
 
         try {

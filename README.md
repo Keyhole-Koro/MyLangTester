@@ -14,9 +14,8 @@ emit `TEST_FAIL:<reason>` through the TestKit `assert_fail` hook. For a test
 that completes from another task or interrupt-driven callback, import
 `runtime/testkit.mln` and call `testkit.pass(name)` or `testkit.fail(reason)`.
 
-Tests which still import the legacy kernel-local `libs/test.mln` keep their
-existing runtime during the migration, so their local `assert_fail` definition
-does not conflict with TestKit.
+The obsolete kernel-local `tests/libs/test.mln` runtime has been removed; new
+and legacy-declaration tests both use TestKit's assertion bridge.
 
 ## Mock and Spy
 

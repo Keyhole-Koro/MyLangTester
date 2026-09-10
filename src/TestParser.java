@@ -118,15 +118,6 @@ public final class TestParser {
         Files.writeString(outPath, generated.toString(), StandardCharsets.UTF_8);
     }
 
-    /**
-     * Existing tests which import the old kernel-local test library supply
-     * their own bare assert_fail hook.  They remain compatible while new
-     * tests use the TestKit-provided hook.
-     */
-    public static boolean usesLegacyTestRuntime(Path path) throws IOException {
-        return Files.readString(path, StandardCharsets.UTF_8).contains("libs/test.mln");
-    }
-
     private static String defaultTestName(Path path) {
         String name = path.getFileName().toString();
         return name.endsWith(".test.mln")
