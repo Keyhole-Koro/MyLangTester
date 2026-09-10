@@ -302,6 +302,9 @@ public final class TestParser {
                 case "timer-interval":
                     meta.timerInterval = value;
                     break;
+                case "disk":
+                    meta.disk = value.equals("true");
+                    break;
                 default:
                     break;
             }

@@ -10,4 +10,6 @@ public final class TestMeta {
     public String expect = "TEST_PASS";
     public String step = "10000000";
     public String timerInterval = "";
+    // A fresh, empty emulator disk is created for this test invocation.
+    public boolean disk = false;
 }

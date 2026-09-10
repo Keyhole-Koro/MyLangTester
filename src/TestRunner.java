@@ -102,6 +102,10 @@ public final class TestRunner {
                 + "  halt\n";
         Files.writeString(paths.stub, stub, StandardCharsets.UTF_8);
         Files.writeString(paths.input, meta.stdinText, StandardCharsets.UTF_8);
+        if (meta.disk) {
+            Files.deleteIfExists(paths.disk);
+            Files.createFile(paths.disk);
+        }
         if (!mockTargets.isEmpty()) {
             Files.writeString(paths.mockFacade, mockEntryAssembly(mockTargets), StandardCharsets.UTF_8);
         }
@@ -148,6 +152,10 @@ public final class TestRunner {
         if (!meta.timerInterval.isEmpty()) {
             command.add("--timer-interval");
             command.add(meta.timerInterval);
+        }
+        if (meta.disk) {
+            command.add("--disk");
+            command.add(paths.disk.toString());
         }
 
         CommandResult result = capture(command, paths.input);
@@ -335,7 +343,8 @@ public final class TestRunner {
                 buildDir.resolve("test_stub.masm"),
                 buildDir.resolve("mock_entries.masm"),
                 buildDir.resolve(name + "_linked.mbin"),
-                buildDir.resolve("stdin.txt"));
+                buildDir.resolve("stdin.txt"),
+                buildDir.resolve("disk.img"));
     }
 
     private static final class TestPaths {
@@ -345,14 +354,17 @@ public final class TestRunner {
         final Path mockFacade;
         final Path linked;
         final Path input;
+        final Path disk;
 
-        TestPaths(Path source, Path buildDir, Path stub, Path mockFacade, Path linked, Path input) {
+        TestPaths(Path source, Path buildDir, Path stub, Path mockFacade, Path linked, Path input,
+                  Path disk) {
             this.source = source;
             this.buildDir = buildDir;
             this.stub = stub;
             this.mockFacade = mockFacade;
             this.linked = linked;
             this.input = input;
+            this.disk = disk;
         }
     }
 
