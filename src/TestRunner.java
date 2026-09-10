@@ -257,7 +257,7 @@ public final class TestRunner {
 
     /**
      * One entry is emitted for every configured target. The entry preserves
-     * the normal r5-r7 ABI, asks the TestKit facade for a configured return
+     * the normal six-word ABI (r5-r7 plus three stack words), asks the TestKit facade for a configured return
      * or fake callback, and calls the original only for an unmatched Spy. Linker redirect logic
      * deliberately leaves this object's original call untouched.
      */
@@ -286,19 +286,22 @@ public final class TestRunner {
                     .append("  push r5\n  push r6\n  push r7\n")
                     .append("  movi r1, ").append(target).append("\n")
                     .append("  movi r2, mock_mock_active_target\n  store r2, r1\n")
-                    .append("  call mock_record\n")
+                    .append(stackArgsFromEntry())
+                    .append("  call mock_record\n  addis sp, 12\n")
                     .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
                     .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
                     .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
-                    .append("  call mock_dispatch\n  cmp r1, 0\n  jz ").append(miss).append("\n")
+                    .append(stackArgsFromEntry())
+                    .append("  call mock_dispatch\n  addis sp, 12\n  cmp r1, 0\n  jz ").append(miss).append("\n")
                     .append("  movi r2, mock_mock_callback\n  load r2, r2\n  cmp r2, 0\n  jz ")
                     .append(configuredReturn).append("\n")
                     .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
                     .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
                     .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
+                    .append(stackArgsFromEntry())
                     .append("  movi r2, mock_mock_callback\n  load r2, r2\n")
                     .append("  movi lr, ").append(callbackReturn).append("\n  mov pc, r2\n")
-                    .append(callbackReturn).append(":\n  jmp ").append(done).append("\n")
+                    .append(callbackReturn).append(":\n  addis sp, 12\n  jmp ").append(done).append("\n")
                     .append(configuredReturn).append(":\n")
                     .append("  movi r2, mock_mock_result\n  load r1, r2\n  jmp ").append(done).append("\n")
                     .append(miss).append(":\n")
@@ -307,13 +310,27 @@ public final class TestRunner {
                     .append("  mov r2, bp\n  addis r2, -4\n  load r5, r2\n")
                     .append("  mov r2, bp\n  addis r2, -8\n  load r6, r2\n")
                     .append("  mov r2, bp\n  addis r2, -12\n  load r7, r2\n")
-                    .append("  call ").append(target).append("\n  jmp ").append(done).append("\n")
+                    .append(stackArgsFromEntry())
+                    .append("  call ").append(target).append("\n  addis sp, 12\n  jmp ").append(done).append("\n")
                     .append(unexpected).append(":\n")
                     .append("  call mock_unexpected\n")
                     .append(done).append(":\n")
                     .append("  mov sp, bp\n  pop bp\n  pop lr\n  mov pc, lr\n\n");
         }
         return out.toString();
+    }
+
+    /** Copy incoming ABI arguments four through six to the outgoing stack.
+     * The entry frame has pushed lr/bp, so the caller's stack area begins at
+     * bp+8. The target ABI stores arg4, arg5, arg6 at outgoing sp+0,+4,+8. */
+    private static String stackArgsFromEntry() {
+        return "  addis sp, -12\n"
+                + "  mov r2, bp\n  addis r2, 8\n  load r1, r2\n"
+                + "  mov r2, sp\n  store r2, r1\n"
+                + "  mov r2, bp\n  addis r2, 12\n  load r1, r2\n"
+                + "  mov r2, sp\n  addis r2, 4\n  store r2, r1\n"
+                + "  mov r2, bp\n  addis r2, 16\n  load r1, r2\n"
+                + "  mov r2, sp\n  addis r2, 8\n  store r2, r1\n";
     }
 
     private static int runQuiet(List<String> command) throws IOException, InterruptedException {
