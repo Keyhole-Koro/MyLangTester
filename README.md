@@ -60,15 +60,13 @@ make
 ## Test Declaration
 
 ```mylang
-import test from "libs/test.mln";
+import assert from "path/to/MyStdLib/assert.mln";
 
-/*@Test "serial_rx" {
-    stdin: "PINGq";
-    expect: "TEST_PASS";
-    step: 10000000;
+/*@Test "addition" {
+    step: 1000000;
 }*/
-void serial_rx() {
-    test.pass();
+void addition() {
+    assert.assert_true(1 + 1 == 2, "addition");
 }
 ```
 
