@@ -303,7 +303,10 @@ public final class TestParser {
                     meta.timerInterval = value;
                     break;
                 case "disk":
-                    meta.disk = value.equals("true");
+                    String disk = unquoteValue(value);
+                    meta.disk = !disk.equals("false");
+                    meta.diskFixture = (disk.equals("true") || disk.equals("false"))
+                            ? "" : disk;
                     break;
                 default:
                     break;

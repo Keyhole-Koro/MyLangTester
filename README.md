@@ -8,9 +8,11 @@ MyEmulator, and checks the expected serial output.
 
 ## TestKit runtime
 
-New tests are linked with `toolchain/MyLangTestKit` automatically.  A normal
+New tests are linked with `toolchain/MyLangTestKit` automatically. A normal
 test-body return emits `TEST_PASS:<name>`, and `MyStdLib/assert.mln` failures
-emit `TEST_FAIL:<reason>` through the TestKit `assert_fail` hook.
+emit `TEST_FAIL:<reason>` through the TestKit `assert_fail` hook. For a test
+that completes from another task or interrupt-driven callback, import
+`runtime/testkit.mln` and call `testkit.pass(name)` or `testkit.fail(reason)`.
 
 Tests which still import the legacy kernel-local `libs/test.mln` keep their
 existing runtime during the migration, so their local `assert_fail` definition
@@ -72,6 +74,9 @@ void serial_rx() {
 
 The name is required. The optional block retains the existing `key: value;`
 metadata, including `stdin`, `expect`, `step`, and `timer_interval`.
+`disk: true` supplies a fresh empty disk. `disk: "fixtures/seed.img"` copies a
+test-file-relative fixture to a private execution disk, so the fixture itself
+is never modified.
 `mytest --list` prints every annotated case as `<file>::<name>`. Multiple
 annotated functions in one file are built and run independently, so their
 TestKit Mock, Spy, and call-history state cannot leak into another case.

@@ -103,8 +103,7 @@ public final class TestRunner {
         Files.writeString(paths.stub, stub, StandardCharsets.UTF_8);
         Files.writeString(paths.input, meta.stdinText, StandardCharsets.UTF_8);
         if (meta.disk) {
-            Files.deleteIfExists(paths.disk);
-            Files.createFile(paths.disk);
+            prepareDisk(meta, paths);
         }
         if (!mockTargets.isEmpty()) {
             Files.writeString(paths.mockFacade, mockEntryAssembly(mockTargets), StandardCharsets.UTF_8);
@@ -200,6 +199,27 @@ public final class TestRunner {
             }
         }
         return sources;
+    }
+
+    /** Prepare a private disk for this invocation; fixture files are read-only inputs. */
+    private static void prepareDisk(TestMeta meta, TestPaths paths) throws IOException {
+        Files.deleteIfExists(paths.disk);
+        if (meta.diskFixture.isEmpty()) {
+            Files.createFile(paths.disk);
+            return;
+        }
+
+        Path declared = Path.of(meta.diskFixture);
+        if (declared.isAbsolute()) {
+            throw new IOException("mytest: disk fixture must be relative to its test file: "
+                    + meta.diskFixture);
+        }
+        Path fixture = paths.testDir.resolve(declared).normalize();
+        if (!fixture.startsWith(paths.testDir) || !Files.isRegularFile(fixture)) {
+            throw new IOException("mytest: disk fixture not found under test directory: "
+                    + meta.diskFixture);
+        }
+        Files.copy(fixture, paths.disk, StandardCopyOption.REPLACE_EXISTING);
     }
 
     private static String verdictReason(String output, String marker) {
@@ -339,6 +359,7 @@ public final class TestRunner {
         Path source = absTest.resolveSibling(generatedSourceName(absTest));
         Path buildDir = repo.resolve(".mytest/build").resolve(name);
         return new TestPaths(
+                absTest.getParent(),
                 source,
                 buildDir,
                 buildDir.resolve("test_stub.masm"),
@@ -349,6 +370,7 @@ public final class TestRunner {
     }
 
     private static final class TestPaths {
+        final Path testDir;
         final Path source;
         final Path buildDir;
         final Path stub;
@@ -357,8 +379,9 @@ public final class TestRunner {
         final Path input;
         final Path disk;
 
-        TestPaths(Path source, Path buildDir, Path stub, Path mockFacade, Path linked, Path input,
-                  Path disk) {
+        TestPaths(Path testDir, Path source, Path buildDir, Path stub, Path mockFacade, Path linked,
+                  Path input, Path disk) {
+            this.testDir = testDir;
             this.source = source;
             this.buildDir = buildDir;
             this.stub = stub;

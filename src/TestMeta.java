@@ -12,4 +12,7 @@ public final class TestMeta {
     public String timerInterval = "";
     // A fresh, empty emulator disk is created for this test invocation.
     public boolean disk = false;
+    // When non-empty, the runner copies this test-file-relative fixture to
+    // the per-invocation disk path instead of creating an empty image.
+    public String diskFixture = "";
 }
