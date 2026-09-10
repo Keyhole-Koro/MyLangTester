@@ -9,14 +9,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public final class TestRunner {
-    private static final Pattern MOCK_TARGET = Pattern.compile(
-            "\\bmock\\s*\\.\\s*(?:of|spy)\\s*\\(\\s*"
-                    + "([A-Za-z_][A-Za-z0-9_]*(?:\\s*\\.\\s*[A-Za-z_][A-Za-z0-9_]*)*)\\s*\\)");
-
     private TestRunner() {
     }
 
@@ -93,6 +87,11 @@ public final class TestRunner {
     private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths, boolean useTestKit,
                                      List<String> mockTargets)
             throws IOException, InterruptedException {
+        if (mockTargets.size() > 8) {
+            System.err.printf("[FAIL] %s: TestKit supports at most 8 mock targets per test (found %d)%n",
+                    meta.name, mockTargets.size());
+            return false;
+        }
         Files.createDirectories(paths.buildDir);
 
         String importPath = paths.source.toString().replace("\\", "\\\\").replace("\"", "\\\"");
@@ -247,12 +246,81 @@ public final class TestRunner {
 
     private static List<String> discoverMockTargets(String text) {
         Set<String> targets = new LinkedHashSet<>();
-        Matcher matcher = MOCK_TARGET.matcher(text);
-        while (matcher.find()) {
-            String target = matcher.group(1).replaceAll("\\s+", "").replace('.', '_');
-            targets.add(target);
+        List<String> tokens = lexCodeTokens(text);
+        for (int i = 0; i + 4 < tokens.size(); i++) {
+            if (!tokens.get(i).equals("mock") || !tokens.get(i + 1).equals(".")) continue;
+            String factory = tokens.get(i + 2);
+            if (!factory.equals("of") && !factory.equals("spy")) continue;
+            if (!tokens.get(i + 3).equals("(")) continue;
+
+            int cursor = i + 4;
+            if (!isIdentifier(tokens.get(cursor))) continue;
+            StringBuilder target = new StringBuilder(tokens.get(cursor++));
+            while (cursor + 1 < tokens.size() && tokens.get(cursor).equals(".") &&
+                    isIdentifier(tokens.get(cursor + 1))) {
+                target.append('_').append(tokens.get(cursor + 1));
+                cursor += 2;
+            }
+            if (cursor < tokens.size() && tokens.get(cursor).equals(")")) {
+                targets.add(target.toString());
+            }
         }
         return List.copyOf(targets);
+    }
+
+    /**
+     * Tokenize only the small fragment needed for mock target discovery. This
+     * deliberately skips comments and string/character literals, unlike the
+     * former regex, so documentation and assertion text cannot create a
+     * redirect to a nonexistent symbol. Full semantic validation remains the
+     * compiler's responsibility.
+     */
+    private static List<String> lexCodeTokens(String text) {
+        List<String> tokens = new ArrayList<>();
+        for (int i = 0; i < text.length();) {
+            char ch = text.charAt(i);
+            if (Character.isWhitespace(ch)) { i++; continue; }
+            if (ch == '/' && i + 1 < text.length() && text.charAt(i + 1) == '/') {
+                int end = text.indexOf('\n', i + 2);
+                i = end < 0 ? text.length() : end + 1;
+                continue;
+            }
+            if (ch == '/' && i + 1 < text.length() && text.charAt(i + 1) == '*') {
+                int end = text.indexOf("*/", i + 2);
+                i = end < 0 ? text.length() : end + 2;
+                continue;
+            }
+            if (ch == '"' || ch == '\'') {
+                char quote = ch;
+                i++;
+                while (i < text.length()) {
+                    if (text.charAt(i) == '\\') { i += 2; continue; }
+                    if (text.charAt(i++) == quote) break;
+                }
+                continue;
+            }
+            if (isIdentifierStart(ch)) {
+                int start = i++;
+                while (i < text.length() && isIdentifierPart(text.charAt(i))) i++;
+                tokens.add(text.substring(start, i));
+                continue;
+            }
+            tokens.add(String.valueOf(ch));
+            i++;
+        }
+        return tokens;
+    }
+
+    private static boolean isIdentifier(String value) {
+        return value != null && !value.isEmpty() && isIdentifierStart(value.charAt(0));
+    }
+
+    private static boolean isIdentifierStart(char ch) {
+        return ch == '_' || Character.isAlphabetic(ch);
+    }
+
+    private static boolean isIdentifierPart(char ch) {
+        return isIdentifierStart(ch) || Character.isDigit(ch);
     }
 
     /**
@@ -269,7 +337,7 @@ public final class TestRunner {
      */
     private static String mockEntryAssembly(List<String> targets) {
         StringBuilder out = new StringBuilder();
-        out.append("import { mock_mock_active_target, mock_mock_result, mock_mock_callback, mock_record, mock_dispatch, ")
+        out.append("import { mock_mock_result, mock_mock_callback, mock_enter, mock_leave, mock_record, mock_dispatch, ")
                 .append("mock_should_call_original, mock_unexpected");
         for (String target : targets) out.append(", ").append(target);
         out.append(" }\n");
@@ -295,8 +363,11 @@ public final class TestRunner {
                     // every target so the generated entry need not duplicate
                     // the compiler's type/ABI analysis.
                     .append("  push r4\n  push r5\n  push r6\n  push r7\n")
-                    .append("  movi r1, ").append(target).append("\n")
-                    .append("  movi r2, mock_mock_active_target\n  store r2, r1\n")
+                    .append("  movi r5, ").append(target).append("\n")
+                    .append("  call mock_enter\n")
+                    .append("  mov r2, bp\n  addis r2, -8\n  load r5, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -12\n  load r6, r2\n")
+                    .append("  mov r2, bp\n  addis r2, -16\n  load r7, r2\n")
                     .append(stackArgsFromEntry())
                     .append("  call mock_record\n  addis sp, 12\n")
                     .append("  mov r2, bp\n  addis r2, -8\n  load r5, r2\n")
@@ -326,9 +397,24 @@ public final class TestRunner {
                     .append(stackArgsFromEntry())
                     .append("  call ").append(target).append("\n  addis sp, 12\n  jmp ").append(done).append("\n")
                     .append(unexpected).append(":\n")
+                    .append("  movi r5, __mlt_unexpected_").append(target).append("\n")
                     .append("  call mock_unexpected\n")
                     .append(done).append(":\n")
+                    // `leave` is an ordinary call and may clobber r1. Keep a
+                    // scalar result intact; aggregate targets ignore r1 and
+                    // have already filled their caller's hidden r4 buffer.
+                    .append("  push r1\n  call mock_leave\n  pop r1\n")
                     .append("  mov sp, bp\n  pop bp\n  pop lr\n  mov pc, lr\n\n");
+        }
+        out.append("; diagnostic strings\n");
+        for (String target : targets) {
+            out.append("__mlt_unexpected_").append(target).append(":\n  .byte ");
+            String text = "mock.unexpected:" + target;
+            for (int i = 0; i < text.length(); i++) {
+                if (i != 0) out.append(", ");
+                out.append(String.format("0x%02X", (int) text.charAt(i)));
+            }
+            out.append(", 0x00\n");
         }
         return out.toString();
     }

@@ -35,11 +35,18 @@ the test. `mock.spy(target)` uses the original implementation when no rule
 matches. `ret(value).then_ret(next)` supplies successive return values.
 `mock.calls(target)` returns the exact intercepted-call count, while
 `mock.called_with(target, ...)` searches the latest sixteen calls with exact
-values or `mock.any()` matchers.
-The initial facade matches up to three word-sized scalar or pointer arguments
-and returns one word. `mytest` discovers the targets, creates the entry
-functions, and passes the redirects through MLC and the linker, including for
-calls within the same source module.
+values, `mock.any()`, or `mock.match(predicate)` matchers. `mock.times`,
+`mock.once`, and `mock.never` are boolean verification helpers intended for
+ordinary `assert` calls.
+
+The facade carries six ordinary ABI words (three registers and three stack
+arguments). Struct/array and `Result` returns use `.call(fake)`; their hidden
+result buffer is forwarded to the fake and to Spy fallback. An aggregate Spy
+fake may delegate with direct `return mock.call_original(args...);`. `mytest`
+discovers targets from code tokens (comments and strings are ignored), creates
+the entries, and passes redirects through MLC and the linker, including for
+calls within the same source module. An unmatched Mock reports
+`TEST_FAIL:mock.unexpected:<target>`.
 
 ## Build
 
