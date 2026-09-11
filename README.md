@@ -6,6 +6,22 @@ It discovers test files, reads `/*@Test*/` pragmas attached to ordinary
 top-level functions, builds each case through the MyLang toolchain, runs it in
 MyEmulator, and checks the expected serial output.
 
+It also owns the compiler fixture suite, so `MyLangCompiler/tests/` contains
+only `.mln` inputs rather than a second set of Python runners:
+
+```bash
+./build/mytest --compiler toolchain/MyLangCompiler/tests
+```
+
+That mode verifies successful and rejected compiler inputs, generic cases,
+canonical source profiles, and the syntax-check/token JSON protocol.
+The corresponding compiler/evaluator matrix is declared in
+`MyLangCompiler/tests/e2e.cases` and runs with:
+
+```bash
+./build/mytest --compiler-e2e toolchain/MyLangCompiler/tests
+```
+
 ## TestKit runtime
 
 New tests are linked with `toolchain/MyLangTestKit` automatically. A normal

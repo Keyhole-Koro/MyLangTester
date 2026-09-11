@@ -18,6 +18,9 @@ public final class Main {
 
     private static void run(String[] args) throws Exception {
         boolean listOnly = false;
+        boolean compilerMode = false;
+        boolean compilerE2EMode = false;
+        List<Path> inputs = new ArrayList<>();
         List<Path> tests = new ArrayList<>();
 
         if (args.length == 0) {
@@ -38,9 +41,44 @@ public final class Main {
                 listOnly = true;
                 continue;
             }
-            tests.addAll(TestDiscoverer.discover(Path.of(arg)));
+            if (arg.equals("--compiler")) {
+                compilerMode = true;
+                continue;
+            }
+            if (arg.equals("--compiler-e2e")) {
+                compilerE2EMode = true;
+                continue;
+            }
+            inputs.add(Path.of(arg));
         }
 
+        if (compilerMode || compilerE2EMode) {
+            if (compilerMode && compilerE2EMode) {
+                throw new IllegalArgumentException("mytest: choose either --compiler or --compiler-e2e");
+            }
+            if (inputs.size() != 1) {
+                throw new IllegalArgumentException("mytest compiler mode expects exactly one tests directory");
+            }
+            Path repo = TestRunner.findRepoRoot();
+            if (listOnly) {
+                if (compilerE2EMode) {
+                    throw new IllegalArgumentException("mytest --list is only available with --compiler");
+                }
+                CompilerTestRunner.list(inputs.get(0));
+                return;
+            }
+            boolean passed = compilerMode
+                    ? CompilerTestRunner.run(repo, inputs.get(0))
+                    : CompilerTestRunner.runE2E(repo, inputs.get(0));
+            if (!passed) {
+                System.exit(1);
+            }
+            return;
+        }
+
+        for (Path input : inputs) {
+            tests.addAll(TestDiscoverer.discover(input));
+        }
         Collections.sort(tests);
 
         if (listOnly) {
@@ -73,6 +111,8 @@ public final class Main {
 
     private static void printUsage(java.io.PrintStream out) {
         out.println("usage: mytest [--list] <path>...");
+        out.println("       mytest [--list] --compiler <MyLangCompiler/tests>");
+        out.println("       mytest --compiler-e2e <MyLangCompiler/tests>");
         out.println("       mytest --help");
         out.println("       mytest --version");
     }
