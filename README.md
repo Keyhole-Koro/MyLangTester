@@ -48,6 +48,10 @@ the entries, and passes redirects through MLC and the linker, including for
 calls within the same source module. An unmatched Mock reports
 `TEST_FAIL:mock.unexpected:<target>`.
 
+For scheduler tests, configure `mock.set_context_provider(scheduler.current_context)`
+before spawning tasks. TestKit then keeps active mock state, return cursors,
+and histories per task while `calls` and `called_with` aggregate them.
+
 ## Build
 
 Requires JDK 11 or newer with `javac` and `java` on `PATH`.

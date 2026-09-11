@@ -337,7 +337,7 @@ public final class TestRunner {
      */
     private static String mockEntryAssembly(List<String> targets) {
         StringBuilder out = new StringBuilder();
-        out.append("import { mock_mock_result, mock_mock_callback, mock_enter, mock_leave, mock_record, mock_dispatch, ")
+        out.append("import { mock_current_result, mock_current_callback, mock_enter, mock_leave, mock_record, mock_dispatch, ")
                 .append("mock_should_call_original, mock_unexpected");
         for (String target : targets) out.append(", ").append(target);
         out.append(" }\n");
@@ -375,18 +375,18 @@ public final class TestRunner {
                     .append("  mov r2, bp\n  addis r2, -16\n  load r7, r2\n")
                     .append(stackArgsFromEntry())
                     .append("  call mock_dispatch\n  addis sp, 12\n  cmp r1, 0\n  jz ").append(miss).append("\n")
-                    .append("  movi r2, mock_mock_callback\n  load r2, r2\n  cmp r2, 0\n  jz ")
+                    .append("  call mock_current_callback\n  mov r2, r1\n  cmp r2, 0\n  jz ")
                     .append(configuredReturn).append("\n")
+                    .append("  mov r3, r2\n")
                     .append("  mov r2, bp\n  addis r2, -4\n  load r4, r2\n")
                     .append("  mov r2, bp\n  addis r2, -8\n  load r5, r2\n")
                     .append("  mov r2, bp\n  addis r2, -12\n  load r6, r2\n")
                     .append("  mov r2, bp\n  addis r2, -16\n  load r7, r2\n")
                     .append(stackArgsFromEntry())
-                    .append("  movi r2, mock_mock_callback\n  load r2, r2\n")
-                    .append("  movi lr, ").append(callbackReturn).append("\n  mov pc, r2\n")
+                    .append("  movi lr, ").append(callbackReturn).append("\n  mov pc, r3\n")
                     .append(callbackReturn).append(":\n  addis sp, 12\n  jmp ").append(done).append("\n")
                     .append(configuredReturn).append(":\n")
-                    .append("  movi r2, mock_mock_result\n  load r1, r2\n  jmp ").append(done).append("\n")
+                    .append("  call mock_current_result\n  jmp ").append(done).append("\n")
                     .append(miss).append(":\n")
                     .append("  call mock_should_call_original\n  cmp r1, 0\n  jz ")
                     .append(unexpected).append("\n")
