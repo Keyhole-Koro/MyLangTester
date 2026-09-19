@@ -161,9 +161,13 @@ public final class CompilerTestRunner {
         List<String> objects = new ArrayList<>();
         Path assembler = repo.resolve("toolchain/MyAssembler/build/myas");
         Path linker = repo.resolve("toolchain/MyLinker/mllinker");
+        // A case may link MyStdLib modules (`../../MyStdLib/str.mln`) alongside
+        // its own sources; nothing else outside the tests tree.
+        Path stdlib = repo.resolve("toolchain/MyStdLib").normalize();
         for (int index = 0; index < test.sources.size(); index++) {
             Path source = tests.resolve(test.sources.get(index)).normalize();
-            if (!source.startsWith(tests) || !Files.isRegularFile(source)) {
+            boolean allowed = source.startsWith(tests) || source.startsWith(stdlib);
+            if (!allowed || !Files.isRegularFile(source)) {
                 results.fail(test.name, "missing source " + test.sources.get(index));
                 return;
             }
