@@ -277,6 +277,8 @@ public final class CompilerTestRunner {
         valid.put("main.safe.mln", "syntax=core, safety=safe");
         valid.put("page.dom.mln", "syntax=dom, safety=default");
         valid.put("page.dom.safe.mln", "syntax=dom, safety=safe");
+        valid.put("schema.contract.mln", "syntax=core, safety=default");
+        valid.put("schema.safe.contract.mln", "syntax=core, safety=safe");
         valid.put("serial.test.mln", "syntax=core, safety=default");
         valid.put("page.dom.test.mln", "syntax=dom, safety=default");
         for (Map.Entry<String, String> entry : valid.entrySet()) {
@@ -290,6 +292,8 @@ public final class CompilerTestRunner {
         invalid.put("page.dom.dom.mln", "duplicate source modifier 'dom'");
         invalid.put("page.safe.safe.mln", "duplicate source modifier 'safe'");
         invalid.put("page.safe.dom.mln", "must precede semantic policy modifiers");
+        invalid.put("schema.contract.safe.mln", "contract source modifier 'safe' must be last");
+        invalid.put("schema.contract.test.mln", "contract source modifier 'test' must be last");
         invalid.put("page.test.dom.mln", "test source modifier 'dom' must be last");
         invalid.put("page..mln", "empty modifier");
         for (Map.Entry<String, String> entry : invalid.entrySet()) {
