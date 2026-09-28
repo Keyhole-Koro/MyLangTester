@@ -25,7 +25,7 @@ The corresponding compiler/evaluator matrix is declared in
 ## TestKit runtime
 
 New tests are linked with `toolchain/MyLangTestKit` automatically. A normal
-test-body return emits `TEST_PASS:<name>`, and `MyStdLib/assert.mln` failures
+test-body return emits `TEST_PASS:<name>`, and `MyStdLib/testing/assert.mln` failures
 emit `TEST_FAIL:<reason>` through the TestKit `assert_fail` hook. For a test
 that completes from another task or interrupt-driven callback, import
 `runtime/testkit.mln` and call `testkit.pass(name)` or `testkit.fail(reason)`.
@@ -86,7 +86,7 @@ make
 ## Test Declaration
 
 ```mylang
-import assert from "path/to/MyStdLib/assert.mln";
+import assert from "path/to/MyStdLib/testing/assert.mln";
 
 /*@Test "addition" {
     step: 1000000;

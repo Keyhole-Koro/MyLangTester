@@ -161,7 +161,7 @@ public final class CompilerTestRunner {
         List<String> objects = new ArrayList<>();
         Path assembler = repo.resolve("toolchain/MyAssembler/build/myas");
         Path linker = repo.resolve("toolchain/MyLinker/mllinker");
-        // A case may link MyStdLib modules (`../../MyStdLib/str.mln`) alongside
+        // A case may link MyStdLib modules (`../../MyStdLib/text/str.mln`) alongside
         // its own sources; nothing else outside the tests tree.
         Path stdlib = repo.resolve("toolchain/MyStdLib").normalize();
         for (int index = 0; index < test.sources.size(); index++) {
