@@ -59,6 +59,10 @@ public final class CompilerTestRunner {
         try {
             runCompileTree(compiler, tests.resolve("succeed"), true, null, work, results);
             runCompileTree(compiler, tests.resolve("fail"), false, null, work, results);
+            // A warn fixture compiles and reports at least one warning.
+            if (Files.isDirectory(tests.resolve("warn"))) {
+                runCompileTree(compiler, tests.resolve("warn"), true, "warning[", work, results);
+            }
             runGenericCases(compiler, tests.resolve("generic_cases"), work, results);
             runSourceProfileCases(compiler, work, results);
             runSyntaxCases(compiler, tests.resolve("syntax_check"), false, results);
@@ -137,7 +141,9 @@ public final class CompilerTestRunner {
             String line = raw.trim();
             if (line.isEmpty() || line.startsWith("#")) continue;
             String[] fields = line.split("\\|", -1);
-            if (fields.length != 3 || fields[0].trim().isEmpty() || fields[2].trim().isEmpty()) {
+            // name | expected R1 | sources [| compiler flags]
+            if ((fields.length != 3 && fields.length != 4)
+                    || fields[0].trim().isEmpty() || fields[2].trim().isEmpty()) {
                 throw new IOException("mytest --compiler-e2e: malformed " + manifest + ":" + lineNumber);
             }
             long expected;
@@ -149,7 +155,13 @@ public final class CompilerTestRunner {
             }
             List<String> sources = new ArrayList<>();
             for (String source : fields[2].split(",")) sources.add(source.trim());
-            cases.add(new E2ECase(fields[0].trim(), expected, sources));
+            List<String> flags = new ArrayList<>();
+            if (fields.length == 4) {
+                for (String flag : fields[3].trim().split("\\s+")) {
+                    if (!flag.isEmpty()) flags.add(flag);
+                }
+            }
+            cases.add(new E2ECase(fields[0].trim(), expected, sources, flags));
         }
         return cases;
     }
@@ -174,8 +186,12 @@ public final class CompilerTestRunner {
             Path assembly = directory.resolve(index + ".masm");
             Path prelink = directory.resolve(index + ".mbin");
             Path object = directory.resolve(index + ".mobj");
-            CommandResult compiled = command(List.of(compiler.resolve("mlc").toString(), source.toString(),
-                    assembly.toString()), directory);
+            List<String> compile = new ArrayList<>();
+            compile.add(compiler.resolve("mlc").toString());
+            compile.addAll(test.flags);
+            compile.add(source.toString());
+            compile.add(assembly.toString());
+            CommandResult compiled = command(compile, directory);
             if (compiled.status != 0) {
                 results.fail(test.name, "compilation failed\n" + compiled.output);
                 return;
@@ -398,11 +414,13 @@ public final class CompilerTestRunner {
         final String name;
         final long expected;
         final List<String> sources;
+        final List<String> flags;
 
-        E2ECase(String name, long expected, List<String> sources) {
+        E2ECase(String name, long expected, List<String> sources, List<String> flags) {
             this.name = name;
             this.expected = expected;
             this.sources = sources;
+            this.flags = flags;
         }
     }
 
