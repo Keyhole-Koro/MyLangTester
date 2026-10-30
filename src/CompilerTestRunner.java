@@ -289,14 +289,15 @@ public final class CompilerTestRunner {
     private static void runSourceProfileCases(Path compiler, Path work, Results results)
             throws IOException, InterruptedException {
         Map<String, String> valid = new LinkedHashMap<>();
-        valid.put("main.mln", "syntax=core, safety=default");
-        valid.put("main.safe.mln", "syntax=core, safety=safe");
-        valid.put("page.dom.mln", "syntax=dom, safety=default");
-        valid.put("page.dom.safe.mln", "syntax=dom, safety=safe");
-        valid.put("schema.contract.mln", "syntax=core, safety=default");
-        valid.put("schema.safe.contract.mln", "syntax=core, safety=safe");
-        valid.put("serial.test.mln", "syntax=core, safety=default");
-        valid.put("page.dom.test.mln", "syntax=dom, safety=default");
+        valid.put("main.mln", "syntax=core, safety=checked");
+        valid.put("main.unsafe.mln", "syntax=core, safety=unsafe");
+        valid.put("page.dom.mln", "syntax=dom, safety=checked");
+        valid.put("page.dom.unsafe.mln", "syntax=dom, safety=unsafe");
+        valid.put("schema.contract.mln", "syntax=core, safety=checked");
+        valid.put("schema.unsafe.contract.mln", "syntax=core, safety=unsafe");
+        valid.put("serial.test.mln", "syntax=core, safety=checked");
+        valid.put("serial.unsafe.test.mln", "syntax=core, safety=unsafe");
+        valid.put("page.dom.test.mln", "syntax=dom, safety=checked");
         for (Map.Entry<String, String> entry : valid.entrySet()) {
             runProfileCase(compiler, work, entry.getKey(), "i32 main() { return 0; }\n", true,
                     entry.getValue(), results);
@@ -306,9 +307,10 @@ public final class CompilerTestRunner {
         invalid.put("page.mlx", "expected a canonical .mln filename");
         invalid.put("page.web.mln", "unknown source modifier 'web'");
         invalid.put("page.dom.dom.mln", "duplicate source modifier 'dom'");
-        invalid.put("page.safe.safe.mln", "duplicate source modifier 'safe'");
-        invalid.put("page.safe.dom.mln", "must precede semantic policy modifiers");
-        invalid.put("schema.contract.safe.mln", "contract source modifier 'safe' must be last");
+        invalid.put("page.unsafe.unsafe.mln", "duplicate source modifier 'unsafe'");
+        invalid.put("page.unsafe.dom.mln", "must precede semantic policy modifiers");
+        invalid.put("schema.contract.unsafe.mln", "contract source modifier 'unsafe' must be last");
+        invalid.put("page.safe.mln", "unknown source modifier 'safe'");
         invalid.put("schema.contract.test.mln", "contract source modifier 'test' must be last");
         invalid.put("page.test.dom.mln", "test source modifier 'dom' must be last");
         invalid.put("page..mln", "empty modifier");
