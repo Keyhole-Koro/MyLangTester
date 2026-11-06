@@ -183,15 +183,15 @@ public final class TestRunner {
     private static List<Path> testKitSources(Path repo) throws IOException {
         Path root = repo.resolve("toolchain/MyLangTestKit");
         List<Path> sources = List.of(
-                root.resolve("runtime/abi.mln"),
-                root.resolve("runtime/testkit.mln"),
-                root.resolve("runtime/verdict.mln"),
-                root.resolve("runtime/matcher.mln"),
-                root.resolve("runtime/return_sequence.mln"),
-                root.resolve("runtime/history.mln"),
-                root.resolve("runtime/mock.mln"),
-                root.resolve("runtime/facade.mln"),
-                root.resolve("platform/mycomputer/verdict.mln"));
+                root.resolve("runtime/abi.unsafe.mln"),
+                root.resolve("runtime/testkit.unsafe.mln"),
+                root.resolve("runtime/verdict.unsafe.mln"),
+                root.resolve("runtime/matcher.unsafe.mln"),
+                root.resolve("runtime/return_sequence.unsafe.mln"),
+                root.resolve("runtime/history.unsafe.mln"),
+                root.resolve("runtime/mock.unsafe.mln"),
+                root.resolve("runtime/facade.unsafe.mln"),
+                root.resolve("platform/mycomputer/verdict.unsafe.mln"));
         for (Path source : sources) {
             if (!Files.isRegularFile(source)) {
                 throw new IOException("mytest: missing MyLangTestKit source " + source);
