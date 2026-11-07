@@ -38,7 +38,8 @@ public final class CompilerTestRunner {
 
     private static final Map<String, String> SYNTAX_ERRORS = Map.of(
             "missing_initializer_expression.mln", "Expected expression before ';'.",
-            "missing_if_condition.mln", "Expected expression before ')'.");
+            "missing_if_condition.mln", "Expected expression before ')'.",
+            "ternary_without_else.mln", "Expected expression before ';'.");
 
     // These files are parked examples, not cases from the retired Python
     // matrix. Keep them in the tree without turning their currently accepted
