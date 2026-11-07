@@ -11,6 +11,11 @@ import java.util.Comparator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -86,15 +91,39 @@ public final class CompilerTestRunner {
 
         Results results = new Results();
         Path work = Files.createTempDirectory("mytest-compiler-e2e-");
+        // Each case has its own directory, so they run side by side. Results are
+        // reported in manifest order, so the output does not depend on timing.
+        ExecutorService pool = Executors.newFixedThreadPool(jobs());
         try {
+            List<Future<Results>> running = new ArrayList<>();
             for (E2ECase test : readE2ECases(casesFile)) {
-                runE2ECase(repo, compiler, tests, test, work, results);
+                running.add(pool.submit(() -> {
+                    Results outcome = Results.deferred();
+                    runE2ECase(repo, compiler, tests, test, work, outcome);
+                    return outcome;
+                }));
+            }
+            for (Future<Results> outcome : running) {
+                try {
+                    outcome.get().reportTo(results);
+                } catch (ExecutionException e) {
+                    throw new IOException("mytest --compiler-e2e: a case could not run", e.getCause());
+                }
             }
         } finally {
+            pool.shutdownNow();
+            pool.awaitTermination(1, TimeUnit.MINUTES);
             deleteTree(work);
         }
         System.out.printf("[SUMMARY] compiler e2e: %d passed, %d failed%n", results.passed, results.failed);
         return results.failed == 0;
+    }
+
+    /** MYTEST_JOBS overrides the default of one case per processor. */
+    private static int jobs() {
+        String configured = System.getenv("MYTEST_JOBS");
+        if (configured != null && !configured.isEmpty()) return Math.max(1, Integer.parseInt(configured));
+        return Runtime.getRuntime().availableProcessors();
     }
 
     public static void list(Path root) throws IOException {
@@ -429,15 +458,33 @@ public final class CompilerTestRunner {
     private static final class Results {
         int passed;
         int failed;
+        private final boolean defer;
+        private final List<String[]> lines = new ArrayList<>();
+
+        Results() { this(false); }
+
+        private Results(boolean defer) { this.defer = defer; }
+
+        /** Holds its lines until reportTo(), for a case running on another thread. */
+        static Results deferred() { return new Results(true); }
 
         void pass(String name) {
             passed++;
-            System.out.printf("[PASS] %s%n", name);
+            if (defer) lines.add(new String[] {name});
+            else System.out.printf("[PASS] %s%n", name);
         }
 
         void fail(String name, String detail) {
             failed++;
-            System.err.printf("[FAIL] %s: %s%n", name, detail);
+            if (defer) lines.add(new String[] {name, detail});
+            else System.err.printf("[FAIL] %s: %s%n", name, detail);
+        }
+
+        void reportTo(Results target) {
+            for (String[] line : lines) {
+                if (line.length == 1) target.pass(line[0]);
+                else target.fail(line[0], line[1]);
+            }
         }
     }
 }
