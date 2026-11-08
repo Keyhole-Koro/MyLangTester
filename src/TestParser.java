@@ -4,6 +4,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public final class TestParser {
     private TestParser() {
@@ -49,8 +50,7 @@ public final class TestParser {
                             + "' has no body in " + path);
                 }
                 meta.functionName = functionName;
-                meta.bodyStart = bodyStart;
-                meta.bodyEnd = findMatching(source, bodyStart, '{', '}');
+                meta.body = source.substring(bodyStart, findMatching(source, bodyStart, '{', '}') + 1);
                 if (meta.name.isEmpty()) meta.name = functionName;
                 tests.add(meta);
                 i = end + 1;
@@ -175,18 +175,22 @@ public final class TestParser {
                     break;
                 case "timer_interval":
                 case "timer-interval":
-                    meta.timerInterval = value;
+                    meta.timerInterval = value.isEmpty() ? Optional.empty() : Optional.of(value);
                     break;
                 case "disk":
-                    String disk = unquoteValue(value);
-                    meta.disk = !disk.equals("false");
-                    meta.diskFixture = (disk.equals("true") || disk.equals("false"))
-                            ? "" : disk;
+                    meta.disk = diskOption(unquoteValue(value));
                     break;
                 default:
                     break;
             }
         }
+    }
+
+    /** `disk: false` attaches none, `disk: true` a fresh one; anything else names a fixture. */
+    private static TestMeta.Disk diskOption(String value) {
+        if (value.equals("false")) return TestMeta.Disk.NONE;
+        if (value.equals("true") || value.isEmpty()) return TestMeta.Disk.EMPTY;
+        return TestMeta.Disk.copyOf(value);
     }
 
     private static String unquoteValue(String value) {

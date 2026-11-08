@@ -40,7 +40,7 @@ public final class TestRunner {
     private static boolean runAnnotated(Path repo, Path absTest, TestMeta meta)
             throws IOException, InterruptedException {
         TestPaths paths = derivePaths(repo, absTest, meta.name);
-        List<String> mockTargets = discoverMockTargets(absTest, meta);
+        List<String> mockTargets = discoverMockTargets(meta.body);
 
         try {
             TestParser.writeAnnotatedHarness(absTest, paths.source, meta);
@@ -69,8 +69,8 @@ public final class TestRunner {
                 + "  halt\n";
         Files.writeString(paths.stub, stub, StandardCharsets.UTF_8);
         Files.writeString(paths.input, meta.stdinText, StandardCharsets.UTF_8);
-        if (meta.disk) {
-            prepareDisk(meta, paths);
+        if (meta.disk.attached) {
+            prepareDisk(meta.disk, paths);
         }
         if (!mockTargets.isEmpty()) {
             Files.writeString(paths.mockFacade, mockEntryAssembly(mockTargets), StandardCharsets.UTF_8);
@@ -113,11 +113,11 @@ public final class TestRunner {
         command.add("--headless");
         command.add("--step");
         command.add(meta.step);
-        if (!meta.timerInterval.isEmpty()) {
+        if (meta.timerInterval.isPresent()) {
             command.add("--timer-interval");
-            command.add(meta.timerInterval);
+            command.add(meta.timerInterval.get());
         }
-        if (meta.disk) {
+        if (meta.disk.attached) {
             command.add("--disk");
             command.add(paths.disk.toString());
         }
@@ -167,22 +167,20 @@ public final class TestRunner {
     }
 
     /** Prepare a private disk for this invocation; fixture files are read-only inputs. */
-    private static void prepareDisk(TestMeta meta, TestPaths paths) throws IOException {
+    private static void prepareDisk(TestMeta.Disk disk, TestPaths paths) throws IOException {
         Files.deleteIfExists(paths.disk);
-        if (meta.diskFixture.isEmpty()) {
+        if (disk.fixture.isEmpty()) {
             Files.createFile(paths.disk);
             return;
         }
 
-        Path declared = Path.of(meta.diskFixture);
-        if (declared.isAbsolute()) {
-            throw new IOException("mytest: disk fixture must be relative to its test file: "
-                    + meta.diskFixture);
+        String declared = disk.fixture.get();
+        if (Path.of(declared).isAbsolute()) {
+            throw new IOException("mytest: disk fixture must be relative to its test file: " + declared);
         }
         Path fixture = paths.testDir.resolve(declared).normalize();
         if (!fixture.startsWith(paths.testDir) || !Files.isRegularFile(fixture)) {
-            throw new IOException("mytest: disk fixture not found under test directory: "
-                    + meta.diskFixture);
+            throw new IOException("mytest: disk fixture not found under test directory: " + declared);
         }
         Files.copy(fixture, paths.disk, StandardCopyOption.REPLACE_EXISTING);
     }
@@ -195,14 +193,6 @@ public final class TestRunner {
         int end = output.indexOf('\n', start);
         String line = end < 0 ? output.substring(start) : output.substring(start, end);
         return line.trim();
-    }
-
-    private static List<String> discoverMockTargets(Path source, TestMeta meta) throws IOException {
-        String text = Files.readString(source, StandardCharsets.UTF_8);
-        if (meta.bodyStart < 0 || meta.bodyEnd <= meta.bodyStart || meta.bodyEnd > text.length()) {
-            throw new IOException("mytest: invalid @Test body range for " + meta.name);
-        }
-        return discoverMockTargets(text.substring(meta.bodyStart, meta.bodyEnd + 1));
     }
 
     private static List<String> discoverMockTargets(String text) {
