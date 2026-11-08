@@ -83,13 +83,8 @@ public final class Main {
 
         if (listOnly) {
             for (Path test : tests) {
-                List<TestMeta> annotated = TestParser.readAnnotatedTests(test);
-                if (annotated.isEmpty()) {
-                    System.out.println(test);
-                } else {
-                    for (TestMeta meta : annotated) {
-                        System.out.printf("%s::%s%n", test, meta.name);
-                    }
+                for (TestMeta meta : TestParser.readAnnotatedTests(test)) {
+                    System.out.printf("%s::%s%n", test, meta.name);
                 }
             }
             return;

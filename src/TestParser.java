@@ -9,26 +9,6 @@ public final class TestParser {
     private TestParser() {
     }
 
-    public static TestMeta readMetadataAndWriteSource(Path path, Path outPath) throws IOException {
-        String source = Files.readString(path, StandardCharsets.UTF_8);
-        ParsedTest test = parseTestSource(path, source);
-        String testName = test.meta.name.isEmpty() ? defaultTestName(path) : test.meta.name;
-        String generated = source.substring(0, test.declStart)
-                + "extern void testkit_pass(char* name);\n\n"
-                + "extern void __mlt_require_abi_v1();\n\n"
-                + "i32 __mlt_test_body() {\n"
-                + source.substring(test.bodyStart + 1, test.bodyEnd)
-                + "\nreturn 0;\n}\n\n"
-                + "i32 kernel_main() {\n"
-                + "__mlt_require_abi_v1();\n"
-                + "__mlt_test_body();\n"
-                + "testkit_pass(\"" + escapeString(testName) + "\");\n"
-                + "return 0;\n}\n"
-                + source.substring(test.tail);
-        Files.writeString(outPath, generated, StandardCharsets.UTF_8);
-        return test.meta;
-    }
-
     /**
      * Discover ordinary functions preceded by a runner pragma:
      *
@@ -103,13 +83,6 @@ public final class TestParser {
         Files.writeString(outPath, generated.toString(), StandardCharsets.UTF_8);
     }
 
-    private static String defaultTestName(Path path) {
-        String name = path.getFileName().toString();
-        return name.endsWith(".test.mln")
-                ? name.substring(0, name.length() - ".test.mln".length())
-                : name;
-    }
-
     private static TestMeta parseTestPragma(Path path, String payload) throws IOException {
         String text = payload.trim();
         if (text.isEmpty() || text.charAt(0) != '"') {
@@ -169,80 +142,6 @@ public final class TestParser {
 
     private static String escapeString(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-
-    private static ParsedTest parseTestSource(Path path, String source) throws IOException {
-        int declStart = findTestKeyword(source, 0);
-        while (declStart >= 0) {
-            int after = skipWs(source, declStart + 4);
-            if (after < source.length() && source.charAt(after) == '(') {
-                return parseTestDeclaration(path, source, declStart);
-            }
-            declStart = findTestKeyword(source, declStart + 4);
-        }
-        throw new IOException("mytest: missing top-level test declaration in " + path);
-    }
-
-    private static ParsedTest parseTestDeclaration(Path path, String source, int declStart) throws IOException {
-        ParsedTest out = new ParsedTest();
-        out.declStart = declStart;
-
-        int p = skipWs(source, declStart + 4);
-        if (charAt(source, p) != '(') {
-            throw new IOException("mytest: expected '(' after test in " + path);
-        }
-        p = skipWs(source, p + 1);
-        if (charAt(source, p) != '"') {
-            throw new IOException("mytest: expected test name string in " + path);
-        }
-
-        int nameEnd = findStringEnd(source, p);
-        out.meta.name = unquoteValue(source.substring(p, nameEnd + 1));
-
-        p = skipWs(source, nameEnd + 1);
-        if (charAt(source, p) != ',') {
-            throw new IOException("mytest: expected options after test name in " + path);
-        }
-        p = skipWs(source, p + 1);
-        if (charAt(source, p) != '{') {
-            throw new IOException("mytest: expected options block in " + path);
-        }
-
-        int optionsStart = p;
-        int optionsEnd = findMatching(source, optionsStart, '{', '}');
-        applyOptions(out.meta, source.substring(optionsStart + 1, optionsEnd), path);
-
-        p = skipWs(source, optionsEnd + 1);
-        if (charAt(source, p) != ',') {
-            throw new IOException("mytest: expected callback after test options in " + path);
-        }
-        p = skipWs(source, p + 1);
-        if (charAt(source, p) != '(') {
-            throw new IOException("mytest: expected callback parameter list in " + path);
-        }
-
-        int paramsEnd = findMatching(source, p, '(', ')');
-        if (skipWs(source, p + 1) != paramsEnd) {
-            throw new IOException("mytest: test callback must not declare parameters in " + path);
-        }
-        p = skipWs(source, paramsEnd + 1);
-        if (charAt(source, p) != '=' || charAt(source, p + 1) != '>') {
-            throw new IOException("mytest: expected => before test callback body in " + path);
-        }
-        p = skipWs(source, p + 2);
-        if (charAt(source, p) != '{') {
-            throw new IOException("mytest: expected callback body in " + path);
-        }
-
-        out.bodyStart = p;
-        out.bodyEnd = findMatching(source, out.bodyStart, '{', '}');
-        p = skipWs(source, out.bodyEnd + 1);
-        if (charAt(source, p) != ')') {
-            throw new IOException("mytest: expected ')' after test callback in " + path);
-        }
-        p = skipWs(source, p + 1);
-        out.tail = charAt(source, p) == ';' ? p + 1 : p;
-        return out;
     }
 
     private static void applyOptions(TestMeta meta, String block, Path path) throws IOException {
@@ -320,21 +219,6 @@ public final class TestParser {
         throw new IOException("mytest: unclosed test name");
     }
 
-    private static int findTestKeyword(String source, int from) {
-        ScannerState state = new ScannerState();
-        for (int i = from; i < source.length(); i++) {
-            int next = state.consume(source, i);
-            if (next != i) {
-                i = next;
-                continue;
-            }
-            if (state.isCode() && isTestKeywordAt(source, i)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
     private static int findMatching(String source, int open, char openChar, char closeChar) throws IOException {
         int depth = 0;
         ScannerState state = new ScannerState();
@@ -357,37 +241,8 @@ public final class TestParser {
         throw new IOException("mytest: unclosed " + openChar + closeChar + " block");
     }
 
-    private static int skipWs(String source, int index) {
-        int i = index;
-        while (i < source.length() && Character.isWhitespace(source.charAt(i))) {
-            i++;
-        }
-        return i;
-    }
-
-    private static char charAt(String source, int index) {
-        return index >= 0 && index < source.length() ? source.charAt(index) : '\0';
-    }
-
-    private static boolean isTestKeywordAt(String source, int index) {
-        if (!source.startsWith("test", index)) {
-            return false;
-        }
-        boolean leftOk = index == 0 || !isIdentChar(source.charAt(index - 1));
-        boolean rightOk = index + 4 >= source.length() || !isIdentChar(source.charAt(index + 4));
-        return leftOk && rightOk;
-    }
-
     private static boolean isIdentChar(char c) {
         return Character.isLetterOrDigit(c) || c == '_';
-    }
-
-    private static final class ParsedTest {
-        final TestMeta meta = new TestMeta();
-        int declStart;
-        int bodyStart;
-        int bodyEnd;
-        int tail;
     }
 
     private static final class ScannerState {

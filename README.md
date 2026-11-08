@@ -30,8 +30,8 @@ emit `TEST_FAIL:<reason>` through the TestKit `assert_fail` hook. For a test
 that completes from another task or interrupt-driven callback, import
 `runtime/testkit.mln` and call `testkit.pass(name)` or `testkit.fail(reason)`.
 
-The obsolete kernel-local `tests/libs/test.mln` runtime has been removed; new
-and legacy-declaration tests both use TestKit's assertion bridge.
+The obsolete kernel-local `tests/libs/test.mln` runtime has been removed; every
+test uses TestKit's assertion bridge.
 
 ## Mock and Spy
 
@@ -104,9 +104,9 @@ is never modified.
 `mytest --list` prints every annotated case as `<file>::<name>`. Multiple
 annotated functions in one file are built and run independently, so their
 TestKit Mock, Spy, and call-history state cannot leak into another case.
-
-The legacy top-level `test(...)` declaration is still supported during the
-migration, but new tests should use `/*@Test*/`.
+Running a `*.test.mln` file without a `/*@Test*/` function is an error. The
+older top-level `test("name", { ... }, () => { ... });` declaration was removed
+on 2026-11-08.
 
 ## Generated Source
 
@@ -123,5 +123,4 @@ underscore:
 | `dom_lowering.dom.test.mln` | `dom_lowering_gen_test.dom.mln` |
 
 A `.dom.test.mln` test therefore keeps DOM syntax, and imports resolve as they do
-from the test file itself because the generated harness is its sibling. Legacy
-`test(...)` files still use the older body-rewriting harness until migrated.
+from the test file itself because the generated harness is its sibling.

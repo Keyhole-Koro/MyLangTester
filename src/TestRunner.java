@@ -27,14 +27,14 @@ public final class TestRunner {
     public static boolean run(Path repo, Path testPath) throws IOException, InterruptedException {
         Path absTest = testPath.toRealPath();
         List<TestMeta> annotatedTests = TestParser.readAnnotatedTests(absTest);
-        if (!annotatedTests.isEmpty()) {
-            boolean passed = true;
-            for (TestMeta meta : annotatedTests) {
-                if (!runAnnotated(repo, absTest, meta)) passed = false;
-            }
-            return passed;
+        if (annotatedTests.isEmpty()) {
+            throw new IOException("mytest: no /*@Test*/ function in " + absTest);
         }
-        return runLegacy(repo, absTest);
+        boolean passed = true;
+        for (TestMeta meta : annotatedTests) {
+            if (!runAnnotated(repo, absTest, meta)) passed = false;
+        }
+        return passed;
     }
 
     private static boolean runAnnotated(Path repo, Path absTest, TestMeta meta)
@@ -46,35 +46,6 @@ public final class TestRunner {
             TestParser.writeAnnotatedHarness(absTest, paths.source, meta);
             if (!buildTest(repo, meta, paths, mockTargets)) return false;
             if (!executeTest(repo, meta, paths)) return false;
-            System.out.printf("[PASS] %s%n", meta.name);
-            return true;
-        } finally {
-            Files.deleteIfExists(paths.source);
-        }
-    }
-
-    private static boolean runLegacy(Path repo, Path absTest) throws IOException, InterruptedException {
-        String base = testBasename(absTest);
-        TestPaths paths = derivePaths(repo, absTest, base);
-        List<String> mockTargets = discoverMockTargets(absTest);
-
-        try {
-            TestMeta meta = TestParser.readMetadataAndWriteSource(absTest, paths.source);
-            if (meta.name.isEmpty()) {
-                meta.name = base;
-            }
-            TestPaths namedPaths = derivePaths(repo, absTest, meta.name);
-            if (!paths.source.equals(namedPaths.source)) {
-                Files.move(paths.source, namedPaths.source, StandardCopyOption.REPLACE_EXISTING);
-            }
-            paths = namedPaths;
-
-            if (!buildTest(repo, meta, paths, mockTargets)) {
-                return false;
-            }
-            if (!executeTest(repo, meta, paths)) {
-                return false;
-            }
             System.out.printf("[PASS] %s%n", meta.name);
             return true;
         } finally {
@@ -224,11 +195,6 @@ public final class TestRunner {
         int end = output.indexOf('\n', start);
         String line = end < 0 ? output.substring(start) : output.substring(start, end);
         return line.trim();
-    }
-
-    private static List<String> discoverMockTargets(Path source) throws IOException {
-        String text = Files.readString(source, StandardCharsets.UTF_8);
-        return discoverMockTargets(text);
     }
 
     private static List<String> discoverMockTargets(Path source, TestMeta meta) throws IOException {
@@ -445,14 +411,6 @@ public final class TestRunner {
         process.getInputStream().transferTo(output);
         int status = process.waitFor();
         return new CommandResult(status, new String(output.toByteArray(), StandardCharsets.UTF_8));
-    }
-
-    private static String testBasename(Path path) {
-        String base = path.getFileName().toString();
-        if (base.endsWith(".test.mln")) {
-            base = base.substring(0, base.length() - ".test.mln".length());
-        }
-        return base.replaceAll("[/ \\t.]", "_");
     }
 
     /**
