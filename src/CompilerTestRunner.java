@@ -8,7 +8,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Comparator;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -20,35 +21,12 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/** Runs compiler-facing fixture tests without embedding a Python runner in MyLangCompiler. */
+/**
+ * Runs compiler-facing fixture tests without embedding a Python runner in
+ * MyLangCompiler. The fixtures' expected diagnostics are declared beside them
+ * in tests/diagnostics.cases.
+ */
 public final class CompilerTestRunner {
-    private static final Map<String, String> GENERIC_FAILURES = Map.ofEntries(
-            Map.entry("wrong_call_type.mln", "argument type mismatch"),
-            Map.entry("wrong_body_type.mln", "return type mismatch"),
-            Map.entry("wrong_call_arity.mln", "error[E0101]"),
-            Map.entry("prototype_only.mln", "requires a definition in this module"),
-            Map.entry("ordinary_type_arguments.mln", "generic declaration is not available"),
-            Map.entry("recursive_value.mln", "infinite size"),
-            Map.entry("recursive_value_array.mln", "infinite size"),
-            Map.entry("expanding_function.mln", "instantiation limit exceeded"),
-            Map.entry("expanding_type.mln", "instantiation limit exceeded"),
-            Map.entry("reference_wrapping.mln", "cannot wrap a reference type argument"),
-            Map.entry("reserved_symbol.mln", "prefix is reserved"));
-
-    private static final Map<String, String> SYNTAX_ERRORS = Map.of(
-            "missing_initializer_expression.mln", "Expected expression before ';'.",
-            "missing_if_condition.mln", "Expected expression before ')'.",
-            "ternary_without_else.mln", "Expected expression before ';'.",
-            "case_key_syntax_error.mln", "Expected expression before '->'.");
-
-    // These files are parked examples, not cases from the retired Python
-    // matrix. Keep them in the tree without turning their currently accepted
-    // forms into false failures for the migrated suite.
-    private static final Set<String> DEFERRED_FAILURE_FIXTURES = Set.of(
-            "semantic/payloadEnumNestedAmbiguous_fail.mln",
-            "struct/byvalArgNonAddressable_fail.mln",
-            "struct/byvalReturnNonAddressable_fail.mln");
-
     private CompilerTestRunner() {
     }
 
@@ -58,21 +36,28 @@ public final class CompilerTestRunner {
         if (!Files.isDirectory(tests.resolve("succeed")) || !Files.isDirectory(tests.resolve("fail"))) {
             throw new IOException("mytest --compiler expects a MyLangCompiler tests directory: " + tests);
         }
+        Path manifest = tests.resolve("diagnostics.cases");
+        if (!Files.isRegularFile(manifest)) {
+            throw new IOException("mytest --compiler: missing " + manifest);
+        }
+        Expectations expected = readExpectations(manifest);
         if (!runBuild(compiler)) return false;
 
         Path work = Files.createTempDirectory("mytest-compiler-");
         Results results = new Results();
         try {
-            runCompileTree(compiler, tests.resolve("succeed"), true, null, work, results);
-            runCompileTree(compiler, tests.resolve("fail"), false, null, work, results);
+            runCompileTree(compiler, tests.resolve("succeed"), true, null, expected, work, results);
+            runCompileTree(compiler, tests.resolve("fail"), false, null, expected, work, results);
             // A warn fixture compiles and reports at least one warning.
             if (Files.isDirectory(tests.resolve("warn"))) {
-                runCompileTree(compiler, tests.resolve("warn"), true, "warning[", work, results);
+                runCompileTree(compiler, tests.resolve("warn"), true, "warning[", expected, work, results);
             }
-            runGenericCases(compiler, tests.resolve("generic_cases"), work, results);
-            runSourceProfileCases(compiler, work, results);
-            runSyntaxCases(compiler, tests.resolve("syntax_check"), false, results);
-            runSyntaxCases(compiler, tests.resolve("token"), true, results);
+            runGenericCases(compiler, tests.resolve("generic_cases"), expected, work, results);
+            for (ProfileCase profile : expected.profiles) {
+                runProfileCase(compiler, work, profile, results);
+            }
+            runSyntaxCases(compiler, tests.resolve("syntax_check"), false, expected, results);
+            runSyntaxCases(compiler, tests.resolve("token"), true, expected, results);
         } finally {
             deleteTree(work);
         }
@@ -137,6 +122,36 @@ public final class CompilerTestRunner {
             }
         }
         System.out.println("source-profiles::canonical-filename-validation");
+    }
+
+    /** Read diagnostics.cases; the format is described at the top of that file. */
+    private static Expectations readExpectations(Path manifest) throws IOException {
+        Expectations expected = new Expectations();
+        int lineNumber = 0;
+        for (String raw : Files.readAllLines(manifest, StandardCharsets.UTF_8)) {
+            lineNumber++;
+            String line = raw.trim();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            String[] fields = line.split("\\|", -1);
+            for (int i = 0; i < fields.length; i++) fields[i] = fields[i].trim();
+            String kind = fields[0];
+            boolean named = fields.length > 1 && !fields[1].isEmpty();
+            if (kind.equals("error") && fields.length == 3 && named) {
+                if (expected.errors.put(fields[1], fields[2]) != null) {
+                    throw new IOException("mytest --compiler: " + fields[1] + " is listed twice in "
+                            + manifest + ":" + lineNumber);
+                }
+            } else if (kind.equals("skip") && fields.length == 2 && named) {
+                expected.skipped.add(fields[1]);
+            } else if ((kind.equals("profile") || kind.equals("profile-error"))
+                    && (fields.length == 3 || fields.length == 4) && named) {
+                String source = fields.length == 4 ? fields[3] : "i32 main() { return 0; }";
+                expected.profiles.add(new ProfileCase(fields[1], source + "\n", kind.equals("profile"), fields[2]));
+            } else {
+                throw new IOException("mytest --compiler: malformed " + manifest + ":" + lineNumber);
+            }
+        }
+        return expected;
     }
 
     private static boolean runBuild(Path compiler) throws IOException, InterruptedException {
@@ -272,23 +287,23 @@ public final class CompilerTestRunner {
     }
 
     private static void runCompileTree(Path compiler, Path directory, boolean expectedSuccess,
-                                       String expectedError, Path work, Results results)
+                                       String expectedError, Expectations expected, Path work, Results results)
             throws IOException, InterruptedException {
         for (Path source : mlnFiles(directory)) {
-            String relative = directory.relativize(source).toString().replace('\\', '/');
-            if (!expectedSuccess && DEFERRED_FAILURE_FIXTURES.contains(relative)) {
-                System.out.printf("[SKIP] deferred fixture fail/%s%n", relative);
+            String name = fixtureName(directory, source);
+            if (expected.skipped.contains(name)) {
+                System.out.printf("[SKIP] deferred fixture %s%n", name);
                 continue;
             }
-            String name = directory.getFileName() + "/" + relative;
             runCompileCase(compiler, source, expectedSuccess, expectedError, name, work, results);
         }
     }
 
-    private static void runGenericCases(Path compiler, Path directory, Path work, Results results)
+    private static void runGenericCases(Path compiler, Path directory, Expectations expected, Path work,
+                                        Results results)
             throws IOException, InterruptedException {
         for (Path source : mlnFiles(directory)) {
-            String marker = GENERIC_FAILURES.get(source.getFileName().toString());
+            String marker = expected.errors.get(fixtureName(directory, source));
             runCompileCase(compiler, source, marker == null, marker,
                     "generic/" + source.getFileName(), work, results);
         }
@@ -316,53 +331,18 @@ public final class CompilerTestRunner {
         results.fail(name, "expected " + expectation + " (exit=" + result.status + ")\n" + result.output);
     }
 
-    private static void runSourceProfileCases(Path compiler, Path work, Results results)
+    private static void runProfileCase(Path compiler, Path work, ProfileCase profile, Results results)
             throws IOException, InterruptedException {
-        Map<String, String> valid = new LinkedHashMap<>();
-        valid.put("main.mln", "syntax=core, safety=checked");
-        valid.put("main.unsafe.mln", "syntax=core, safety=unsafe");
-        valid.put("page.dom.mln", "syntax=dom, safety=checked");
-        valid.put("page.dom.unsafe.mln", "syntax=dom, safety=unsafe");
-        valid.put("schema.contract.mln", "syntax=core, safety=checked");
-        valid.put("schema.unsafe.contract.mln", "syntax=core, safety=unsafe");
-        valid.put("serial.test.mln", "syntax=core, safety=checked");
-        valid.put("serial.unsafe.test.mln", "syntax=core, safety=unsafe");
-        valid.put("page.dom.test.mln", "syntax=dom, safety=checked");
-        for (Map.Entry<String, String> entry : valid.entrySet()) {
-            runProfileCase(compiler, work, entry.getKey(), "i32 main() { return 0; }\n", true,
-                    entry.getValue(), results);
-        }
-
-        Map<String, String> invalid = new LinkedHashMap<>();
-        invalid.put("page.mlx", "expected a canonical .mln filename");
-        invalid.put("page.web.mln", "unknown source modifier 'web'");
-        invalid.put("page.dom.dom.mln", "duplicate source modifier 'dom'");
-        invalid.put("page.unsafe.unsafe.mln", "duplicate source modifier 'unsafe'");
-        invalid.put("page.unsafe.dom.mln", "must precede semantic policy modifiers");
-        invalid.put("schema.contract.unsafe.mln", "contract source modifier 'unsafe' must be last");
-        invalid.put("page.safe.mln", "unknown source modifier 'safe'");
-        invalid.put("schema.contract.test.mln", "contract source modifier 'test' must be last");
-        invalid.put("page.test.dom.mln", "test source modifier 'dom' must be last");
-        invalid.put("page..mln", "empty modifier");
-        for (Map.Entry<String, String> entry : invalid.entrySet()) {
-            runProfileCase(compiler, work, entry.getKey(), "i32 main() { return 0; }\n", false,
-                    entry.getValue(), results);
-        }
-        runProfileCase(compiler, work, "page.mln", "DomNode* build() { return <Window/>; }\n", false,
-                "DOM syntax requires a canonical .dom.mln filename", results);
-    }
-
-    private static void runProfileCase(Path compiler, Path work, String filename, String sourceText,
-                                       boolean expectedSuccess, String marker, Results results)
-            throws IOException, InterruptedException {
-        Path source = work.resolve("profiles").resolve(filename);
+        Path source = work.resolve("profiles").resolve(profile.filename);
         Files.createDirectories(source.getParent());
-        Files.writeString(source, sourceText, StandardCharsets.UTF_8,
+        Files.writeString(source, profile.source, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-        runCompileCase(compiler, source, expectedSuccess, marker, "source-profile/" + filename, work, results);
+        runCompileCase(compiler, source, profile.accepted, profile.text, "source-profile/" + profile.filename,
+                work, results);
     }
 
-    private static void runSyntaxCases(Path compiler, Path directory, boolean tokenCases, Results results)
+    private static void runSyntaxCases(Path compiler, Path directory, boolean tokenCases, Expectations expected,
+                                       Results results)
             throws IOException, InterruptedException {
         if (!Files.isDirectory(directory)) return;
         Process process = new ProcessBuilder(compiler.resolve("mylang-syntax-check").toString(), "--stdio")
@@ -382,18 +362,15 @@ public final class CompilerTestRunner {
                 input.write('\n');
                 input.flush();
                 String response = output.readLine();
-                String file = source.getFileName().toString();
-                boolean expectedError = tokenCases
-                        ? file.equals("tokens_present_on_error.mln")
-                        : SYNTAX_ERRORS.containsKey(file);
-                String status = expectedError ? "\"status\":\"error\"" : "\"status\":\"ok\"";
-                String marker = tokenCases ? "\"tokens\":" : SYNTAX_ERRORS.get(file);
+                String name = fixtureName(directory, source);
+                String error = expected.errors.get(name);
+                String status = error != null ? "\"status\":\"error\"" : "\"status\":\"ok\"";
                 if (response != null && response.contains(status)
-                        && (marker == null || response.contains(marker))) {
-                    results.pass(directory.getFileName() + "/" + file);
+                        && (!tokenCases || response.contains("\"tokens\":"))
+                        && (error == null || response.contains(error))) {
+                    results.pass(name);
                 } else {
-                    results.fail(directory.getFileName() + "/" + file,
-                            "unexpected syntax-check response: " + response);
+                    results.fail(name, "unexpected syntax-check response: " + response);
                 }
             }
         } finally {
@@ -411,6 +388,11 @@ public final class CompilerTestRunner {
         }
     }
 
+    /** A fixture's name relative to the tests directory, as diagnostics.cases spells it. */
+    private static String fixtureName(Path directory, Path source) {
+        return directory.getFileName() + "/" + directory.relativize(source).toString().replace('\\', '/');
+    }
+
     private static String safeName(String value) {
         return value.replaceAll("[^A-Za-z0-9_.-]", "_");
     }
@@ -420,6 +402,29 @@ public final class CompilerTestRunner {
             for (Path path : stream.sorted(Comparator.reverseOrder()).collect(Collectors.toList())) {
                 Files.deleteIfExists(path);
             }
+        }
+    }
+
+    /** What diagnostics.cases says that the fixtures' directories do not. */
+    private static final class Expectations {
+        // Fixture -> text that must appear when it is rejected.
+        final Map<String, String> errors = new HashMap<>();
+        final Set<String> skipped = new HashSet<>();
+        final List<ProfileCase> profiles = new ArrayList<>();
+    }
+
+    /** A source written under `filename` that mlc must accept or refuse. */
+    private static final class ProfileCase {
+        final String filename;
+        final String source;
+        final boolean accepted;
+        final String text;
+
+        ProfileCase(String filename, String source, boolean accepted, String text) {
+            this.filename = filename;
+            this.source = source;
+            this.accepted = accepted;
+            this.text = text;
         }
     }
 

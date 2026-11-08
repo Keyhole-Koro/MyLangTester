@@ -7,14 +7,16 @@ top-level functions, builds each case through the MyLang toolchain, runs it in
 MyEmulator, and checks the expected serial output.
 
 It also owns the compiler fixture suite, so `MyLangCompiler/tests/` contains
-only `.mln` inputs rather than a second set of Python runners:
+`.mln` inputs and their expectations rather than a second set of Python runners:
 
 ```bash
 ./build/mytest --compiler toolchain/MyLangCompiler/tests
 ```
 
 That mode verifies successful and rejected compiler inputs, generic cases,
-canonical source profiles, and the syntax-check/token JSON protocol.
+canonical source profiles, and the syntax-check/token JSON protocol. What a
+rejected input must report, which fixtures are parked, and the source-profile
+cases are declared in `MyLangCompiler/tests/diagnostics.cases`.
 The corresponding compiler/evaluator matrix is declared in
 `MyLangCompiler/tests/e2e.cases` and runs with:
 
