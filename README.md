@@ -52,7 +52,7 @@ mock.spy(ssd.read_block)
 the test. `mock.spy(target)` uses the original implementation when no rule
 matches. `ret(value).then_ret(next)` supplies successive return values.
 `mock.calls(target)` returns the exact intercepted-call count, while
-`mock.called_with(target, ...)` searches the latest sixteen calls with exact
+`mock.called_with(target, ...)` searches every recorded call with exact
 values, `mock.any()`, or `mock.match(predicate)` matchers. `mock.times`,
 `mock.once`, and `mock.never` are boolean verification helpers intended for
 ordinary `assert` calls.
