@@ -9,32 +9,22 @@ public final class TestParser {
     private TestParser() {
     }
 
-    public static TestMeta readMetadataAndWriteSource(Path path, Path outPath, boolean useTestKit)
-            throws IOException {
+    public static TestMeta readMetadataAndWriteSource(Path path, Path outPath) throws IOException {
         String source = Files.readString(path, StandardCharsets.UTF_8);
         ParsedTest test = parseTestSource(path, source);
-        String generated;
-        if (useTestKit) {
-            String testName = test.meta.name.isEmpty() ? defaultTestName(path) : test.meta.name;
-            generated = source.substring(0, test.declStart)
-                    + "extern void testkit_pass(char* name);\n\n"
-                    + "extern void __mlt_require_abi_v1();\n\n"
-                    + "i32 __mlt_test_body() {\n"
-                    + source.substring(test.bodyStart + 1, test.bodyEnd)
-                    + "\nreturn 0;\n}\n\n"
-                    + "i32 kernel_main() {\n"
-                    + "__mlt_require_abi_v1();\n"
-                    + "__mlt_test_body();\n"
-                    + "testkit_pass(\"" + escapeString(testName) + "\");\n"
-                    + "return 0;\n}\n"
-                    + source.substring(test.tail);
-        } else {
-            generated = source.substring(0, test.declStart)
-                    + "i32 kernel_main() {\n"
-                    + source.substring(test.bodyStart + 1, test.bodyEnd)
-                    + "\nreturn 0;\n}\n"
-                    + source.substring(test.tail);
-        }
+        String testName = test.meta.name.isEmpty() ? defaultTestName(path) : test.meta.name;
+        String generated = source.substring(0, test.declStart)
+                + "extern void testkit_pass(char* name);\n\n"
+                + "extern void __mlt_require_abi_v1();\n\n"
+                + "i32 __mlt_test_body() {\n"
+                + source.substring(test.bodyStart + 1, test.bodyEnd)
+                + "\nreturn 0;\n}\n\n"
+                + "i32 kernel_main() {\n"
+                + "__mlt_require_abi_v1();\n"
+                + "__mlt_test_body();\n"
+                + "testkit_pass(\"" + escapeString(testName) + "\");\n"
+                + "return 0;\n}\n"
+                + source.substring(test.tail);
         Files.writeString(outPath, generated, StandardCharsets.UTF_8);
         return test.meta;
     }
@@ -98,23 +88,18 @@ public final class TestParser {
     }
 
     /** Write a tiny harness without modifying the annotated test function. */
-    public static void writeAnnotatedHarness(Path original, Path outPath, TestMeta meta,
-                                             boolean useTestKit) throws IOException {
+    public static void writeAnnotatedHarness(Path original, Path outPath, TestMeta meta) throws IOException {
         String importPath = original.toString().replace("\\", "\\\\").replace("\"", "\\\"");
         StringBuilder generated = new StringBuilder();
         generated.append("import { ").append(meta.functionName).append(" } from \"")
-                .append(importPath).append("\";\n\n");
-        if (useTestKit) {
-            generated.append("extern void testkit_pass(char* name);\n")
-                    .append("extern void __mlt_require_abi_v1();\n\n");
-        }
-        generated.append("i32 kernel_main() {\n");
-        if (useTestKit) generated.append("__mlt_require_abi_v1();\n");
-        generated.append(meta.functionName).append("();\n");
-        if (useTestKit) {
-            generated.append("testkit_pass(\"").append(escapeString(meta.name)).append("\");\n");
-        }
-        generated.append("return 0;\n}\n");
+                .append(importPath).append("\";\n\n")
+                .append("extern void testkit_pass(char* name);\n")
+                .append("extern void __mlt_require_abi_v1();\n\n")
+                .append("i32 kernel_main() {\n")
+                .append("__mlt_require_abi_v1();\n")
+                .append(meta.functionName).append("();\n")
+                .append("testkit_pass(\"").append(escapeString(meta.name)).append("\");\n")
+                .append("return 0;\n}\n");
         Files.writeString(outPath, generated.toString(), StandardCharsets.UTF_8);
     }
 

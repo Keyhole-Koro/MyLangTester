@@ -40,13 +40,12 @@ public final class TestRunner {
     private static boolean runAnnotated(Path repo, Path absTest, TestMeta meta)
             throws IOException, InterruptedException {
         TestPaths paths = derivePaths(repo, absTest, meta.name);
-        boolean useTestKit = true;
-        List<String> mockTargets = useTestKit ? discoverMockTargets(absTest, meta) : List.of();
+        List<String> mockTargets = discoverMockTargets(absTest, meta);
 
         try {
-            TestParser.writeAnnotatedHarness(absTest, paths.source, meta, useTestKit);
-            if (!buildTest(repo, meta, paths, useTestKit, mockTargets)) return false;
-            if (!executeTest(repo, meta, paths, useTestKit)) return false;
+            TestParser.writeAnnotatedHarness(absTest, paths.source, meta);
+            if (!buildTest(repo, meta, paths, mockTargets)) return false;
+            if (!executeTest(repo, meta, paths)) return false;
             System.out.printf("[PASS] %s%n", meta.name);
             return true;
         } finally {
@@ -57,11 +56,10 @@ public final class TestRunner {
     private static boolean runLegacy(Path repo, Path absTest) throws IOException, InterruptedException {
         String base = testBasename(absTest);
         TestPaths paths = derivePaths(repo, absTest, base);
-        boolean useTestKit = true;
-        List<String> mockTargets = useTestKit ? discoverMockTargets(absTest) : List.of();
+        List<String> mockTargets = discoverMockTargets(absTest);
 
         try {
-            TestMeta meta = TestParser.readMetadataAndWriteSource(absTest, paths.source, useTestKit);
+            TestMeta meta = TestParser.readMetadataAndWriteSource(absTest, paths.source);
             if (meta.name.isEmpty()) {
                 meta.name = base;
             }
@@ -71,10 +69,10 @@ public final class TestRunner {
             }
             paths = namedPaths;
 
-            if (!buildTest(repo, meta, paths, useTestKit, mockTargets)) {
+            if (!buildTest(repo, meta, paths, mockTargets)) {
                 return false;
             }
-            if (!executeTest(repo, meta, paths, useTestKit)) {
+            if (!executeTest(repo, meta, paths)) {
                 return false;
             }
             System.out.printf("[PASS] %s%n", meta.name);
@@ -84,8 +82,7 @@ public final class TestRunner {
         }
     }
 
-    private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths, boolean useTestKit,
-                                     List<String> mockTargets)
+    private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths, List<String> mockTargets)
             throws IOException, InterruptedException {
         if (mockTargets.size() > 8) {
             System.err.printf("[FAIL] %s: TestKit supports at most 8 mock targets per test (found %d)%n",
@@ -116,10 +113,8 @@ public final class TestRunner {
         if (!mockTargets.isEmpty()) {
             command.add(paths.mockFacade.toString());
         }
-        if (useTestKit) {
-            for (Path source : testKitSources(repo)) {
-                command.add(source.toString());
-            }
+        for (Path source : testKitSources(repo)) {
+            command.add(source.toString());
         }
         command.add("-o");
         command.add(paths.linked.toString());
@@ -138,7 +133,7 @@ public final class TestRunner {
         return true;
     }
 
-    private static boolean executeTest(Path repo, TestMeta meta, TestPaths paths, boolean useTestKit)
+    private static boolean executeTest(Path repo, TestMeta meta, TestPaths paths)
             throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
         command.add(repo.resolve("runtime/MyEmulator/target/release/myemu").toString());
@@ -167,7 +162,7 @@ public final class TestRunner {
             System.err.println(result.output);
             return false;
         }
-        if (useTestKit && !result.output.contains("TEST_PASS:")) {
+        if (!result.output.contains("TEST_PASS:")) {
             System.err.printf("[FAIL] %s: no test verdict%n", meta.name);
             System.err.println(result.output);
             return false;
