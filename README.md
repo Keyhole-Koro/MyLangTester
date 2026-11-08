@@ -83,6 +83,7 @@ make
 ```bash
 ./build/mytest --list path/to/tests
 ./build/mytest path/to/tests/example.test.mln
+make test    # the runner's own cases in tests/, e.g. both option layouts
 ```
 
 ## Test Declaration
@@ -99,7 +100,9 @@ void addition() {
 ```
 
 The name is required. The optional block retains the existing `key: value;`
-metadata, including `stdin`, `expect`, `step`, and `timer_interval`.
+metadata, including `stdin`, `expect`, `step`, and `timer_interval`. Options
+may take a line each or share one, `{ step: 5000000; disk: true; }`; `//`
+comments run to the end of the line, and a quoted value may contain `;`.
 `disk: true` supplies a fresh empty disk. `disk: "fixtures/seed.img"` copies a
 test-file-relative fixture to a private execution disk, so the fixture itself
 is never modified.

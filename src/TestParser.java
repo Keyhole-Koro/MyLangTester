@@ -160,21 +160,18 @@ public final class TestParser {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    /**
+     * Apply the `key: value;` options of a metadata block. They may share a
+     * line, `{ step: 5; disk: true; }`, or take one line each.
+     */
     private static void applyOptions(TestMeta meta, String block, Path path) throws IOException {
-        for (String rawLine : block.split("\\R")) {
-            String line = rawLine.trim();
-            if (line.isEmpty() || line.startsWith("//")) {
-                continue;
-            }
-            int colon = line.indexOf(':');
+        for (String option : optionStatements(block)) {
+            int colon = option.indexOf(':');
             if (colon < 0) {
-                throw new IOException("mytest: invalid test metadata line: " + line + " in " + path);
+                throw new IOException("mytest: invalid test metadata: " + option + " in " + path);
             }
-            String key = line.substring(0, colon).trim();
-            String value = line.substring(colon + 1).trim();
-            if (value.endsWith(";")) {
-                value = value.substring(0, value.length() - 1).trim();
-            }
+            String key = option.substring(0, colon).trim();
+            String value = option.substring(colon + 1).trim();
 
             switch (key) {
                 case "name":
@@ -200,6 +197,54 @@ public final class TestParser {
                     break;
             }
         }
+    }
+
+    /**
+     * Split a metadata block into its options, trimmed and without their `;`.
+     * An option ends at a `;` or at the end of its line, and `//` starts a
+     * comment running to the end of the line; neither counts inside a quoted
+     * value, so `expect: "a; b";` keeps its semicolon. A value never spans
+     * lines, quoted or not.
+     */
+    private static List<String> optionStatements(String block) {
+        List<String> options = new ArrayList<>();
+        StringBuilder option = new StringBuilder();
+        boolean quoted = false;
+        for (int i = 0; i < block.length(); i++) {
+            char c = block.charAt(i);
+            if (c == '\n' || c == '\r') {
+                quoted = false;
+                addOption(options, option);
+            } else if (quoted) {
+                option.append(c);
+                if (c == '\\' && i + 1 < block.length() && block.charAt(i + 1) != '\n'
+                        && block.charAt(i + 1) != '\r') {
+                    option.append(block.charAt(++i));
+                } else if (c == '"') {
+                    quoted = false;
+                }
+            } else if (c == '"') {
+                quoted = true;
+                option.append(c);
+            } else if (block.startsWith("//", i)) {
+                while (i + 1 < block.length() && block.charAt(i + 1) != '\n'
+                        && block.charAt(i + 1) != '\r') {
+                    i++;
+                }
+            } else if (c == ';') {
+                addOption(options, option);
+            } else {
+                option.append(c);
+            }
+        }
+        addOption(options, option);
+        return options;
+    }
+
+    private static void addOption(List<String> options, StringBuilder option) {
+        String text = option.toString().trim();
+        if (!text.isEmpty()) options.add(text);
+        option.setLength(0);
     }
 
     /** `disk: false` attaches none, `disk: true` a fresh one; anything else names a fixture. */

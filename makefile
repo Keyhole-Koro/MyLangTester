@@ -13,7 +13,12 @@ $(TARGET): $(SRC)
 	@printf '%s\n' '#!/bin/sh' 'SCRIPT_DIR=$$(CDPATH= cd -- "$$(dirname -- "$$0")" && pwd)' 'exec java -Djava.io.tmpdir="$${TMPDIR:-/tmp}" -cp "$$SCRIPT_DIR/classes" Main "$$@"' > $@
 	@chmod +x $@
 
+# The runner's own cases. They build and run like any test, so the MyComputer
+# toolchain and emulator must be built.
+test: $(TARGET)
+	./$(TARGET) tests
+
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all clean
+.PHONY: all test clean

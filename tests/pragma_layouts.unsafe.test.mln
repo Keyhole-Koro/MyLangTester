@@ -1,0 +1,45 @@
+import assert from "@std/testing/assert.mln";
+import str from "@std/text/str.mln";
+import serial from "@kernel/io/serial.mln";
+
+// mytest reads a test's options however its block is laid out: one per line,
+// or several on one line. Both cases below give the same options and check
+// what reaches the guest, so a misread block fails: a wrong `step` keeps the
+// emulator from starting, and a lost or cut `stdin` sends other bytes. The
+// stdin value keeps a `;` and a `//`, which end an option or start a comment
+// only outside quotes.
+
+// Reads the UART up to the 'q' the stdin option ends with, and checks that
+// the bytes before it are `want`.
+void expect_stdin(str want) {
+    i32 got = 0;
+    i32 polls = 0;
+    while (1) {
+        if (!serial.rx_ready()) {
+            polls++;
+            assert.assert_true(polls < 1000000, "the stdin option reached the UART");
+            continue;
+        }
+        polls = 0;
+        i32 c = serial.read_rx();
+        if (c == 'q') { break; }
+        assert.assert_true(got < want.length, "no more stdin than the option gave");
+        assert.assert_true(c == want.byte(got), "stdin is the option's text");
+        got++;
+    }
+    assert.assert_true(got == want.length, "all of the option's stdin arrived");
+}
+
+/*@Test "options on separate lines" {
+    step: 50000000;
+    stdin: "a;b//cq";
+    expect: "TEST_PASS:options on separate lines";
+}*/
+void options_on_separate_lines() {
+    expect_stdin("a;b//c");
+}
+
+/*@Test "options on one line" { step: 50000000; stdin: "a;b//cq"; expect: "TEST_PASS:options on one line"; }*/
+void options_on_one_line() {
+    expect_stdin("a;b//c");
+}
