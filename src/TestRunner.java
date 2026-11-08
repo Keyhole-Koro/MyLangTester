@@ -1,5 +1,3 @@
-import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardCopyOption;
@@ -96,7 +94,7 @@ public final class TestRunner {
             command.add(target + "=__mlt_entry_" + target);
         }
 
-        int status = runQuiet(command);
+        int status = Processes.runQuiet(command);
         if (status != 0) {
             System.err.printf("[FAIL] %s: build failed%n", meta.name);
             return false;
@@ -122,7 +120,8 @@ public final class TestRunner {
             command.add(paths.disk.toString());
         }
 
-        CommandResult result = capture(command, paths.input);
+        Processes.Result result = Processes.capture(
+                new ProcessBuilder(command).redirectInput(paths.input.toFile()));
         String failure = verdictReason(result.output, "TEST_FAIL:");
         if (failure != null) {
             System.err.printf("[FAIL] %s: %s%n", meta.name, failure);
@@ -383,26 +382,6 @@ public final class TestRunner {
                 + "  mov r2, sp\n  addis r2, 8\n  store r2, r1\n";
     }
 
-    private static int runQuiet(List<String> command) throws IOException, InterruptedException {
-        Process process = new ProcessBuilder(command)
-                .redirectOutput(new File("/dev/null"))
-                .redirectError(ProcessBuilder.Redirect.INHERIT)
-                .start();
-        return process.waitFor();
-    }
-
-    private static CommandResult capture(List<String> command, Path input)
-            throws IOException, InterruptedException {
-        Process process = new ProcessBuilder(command)
-                .redirectInput(input.toFile())
-                .redirectErrorStream(true)
-                .start();
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(output);
-        int status = process.waitFor();
-        return new CommandResult(status, new String(output.toByteArray(), StandardCharsets.UTF_8));
-    }
-
     /**
      * Filename of the generated MyLang source, written next to the test file.
      *
@@ -459,16 +438,6 @@ public final class TestRunner {
             this.linked = linked;
             this.input = input;
             this.disk = disk;
-        }
-    }
-
-    private static final class CommandResult {
-        final int status;
-        final String output;
-
-        CommandResult(int status, String output) {
-            this.status = status;
-            this.output = output;
         }
     }
 }

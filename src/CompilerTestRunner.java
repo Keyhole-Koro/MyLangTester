@@ -1,5 +1,4 @@
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -141,7 +140,7 @@ public final class CompilerTestRunner {
     }
 
     private static boolean runBuild(Path compiler) throws IOException, InterruptedException {
-        CommandResult build = command(List.of("make", "all", "syntax-check"), compiler);
+        Processes.Result build = Processes.capture(List.of("make", "all", "syntax-check"), compiler);
         if (build.status == 0) return true;
         System.err.println("[FAIL] compiler fixture setup: could not build MyLangCompiler");
         System.err.print(build.output);
@@ -151,7 +150,8 @@ public final class CompilerTestRunner {
     private static boolean runE2EBuild(Path repo) throws IOException, InterruptedException {
         List<String> locations = List.of("toolchain/MyAssembler", "toolchain/MyLinker", "runtime/MyEmulator");
         for (String location : locations) {
-            CommandResult build = command(List.of("make", "-C", repo.resolve(location).toString(), "all"), repo);
+            Processes.Result build = Processes.capture(
+                    List.of("make", "-C", repo.resolve(location).toString(), "all"), repo);
             if (build.status == 0) continue;
             if (location.equals("runtime/MyEmulator")
                     && Files.isExecutable(repo.resolve("runtime/MyEmulator/target/release/myemu"))) {
@@ -222,13 +222,13 @@ public final class CompilerTestRunner {
             compile.addAll(test.flags);
             compile.add(source.toString());
             compile.add(assembly.toString());
-            CommandResult compiled = command(compile, directory);
+            Processes.Result compiled = Processes.capture(compile, directory);
             if (compiled.status != 0) {
                 results.fail(test.name, "compilation failed\n" + compiled.output);
                 return;
             }
-            CommandResult assembled = command(List.of(assembler.toString(), assembly.toString(), prelink.toString(),
-                    "--obj", object.toString()), directory);
+            Processes.Result assembled = Processes.capture(List.of(assembler.toString(), assembly.toString(),
+                    prelink.toString(), "--obj", object.toString()), directory);
             if (assembled.status != 0) {
                 results.fail(test.name, "assembly failed\n" + assembled.output);
                 return;
@@ -240,12 +240,13 @@ public final class CompilerTestRunner {
         link.add(linker.toString());
         link.add(binary.toString());
         link.addAll(objects);
-        CommandResult linked = command(link, directory);
+        Processes.Result linked = Processes.capture(link, directory);
         if (linked.status != 0) {
             results.fail(test.name, "link failed\n" + linked.output);
             return;
         }
-        CommandResult executed = command(List.of(repo.resolve("runtime/MyEmulator/target/release/myemu").toString(),
+        Processes.Result executed = Processes.capture(List.of(
+                repo.resolve("runtime/MyEmulator/target/release/myemu").toString(),
                 "-i", binary.toString(), "--headless", "--reg", "R1"), directory);
         if (executed.status != 0) {
             results.fail(test.name, "emulator failed\n" + executed.output);
@@ -300,7 +301,7 @@ public final class CompilerTestRunner {
             throws IOException, InterruptedException {
         Path output = work.resolve("compile").resolve(safeName(name) + ".masm");
         Files.createDirectories(output.getParent());
-        CommandResult result = command(List.of(compiler.resolve("mlc").toString(),
+        Processes.Result result = Processes.capture(List.of(compiler.resolve("mlc").toString(),
                 source.toString(), output.toString()), compiler);
         boolean statusMatches = expectedSuccess == (result.status == 0);
         boolean outputMatches = !expectedSuccess || (Files.isRegularFile(output)
@@ -412,15 +413,6 @@ public final class CompilerTestRunner {
         }
     }
 
-    private static CommandResult command(List<String> arguments, Path directory)
-            throws IOException, InterruptedException {
-        Process process = new ProcessBuilder(arguments).directory(directory.toFile())
-                .redirectErrorStream(true).start();
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        process.getInputStream().transferTo(bytes);
-        return new CommandResult(process.waitFor(), new String(bytes.toByteArray(), StandardCharsets.UTF_8));
-    }
-
     private static String safeName(String value) {
         return value.replaceAll("[^A-Za-z0-9_.-]", "_");
     }
@@ -430,16 +422,6 @@ public final class CompilerTestRunner {
             for (Path path : stream.sorted(Comparator.reverseOrder()).collect(Collectors.toList())) {
                 Files.deleteIfExists(path);
             }
-        }
-    }
-
-    private static final class CommandResult {
-        final int status;
-        final String output;
-
-        CommandResult(int status, String output) {
-            this.status = status;
-            this.output = output;
         }
     }
 
