@@ -54,7 +54,7 @@ public final class CompilerTestRunner {
 
     public static boolean run(Path repo, Path root) throws IOException, InterruptedException {
         Path tests = root.toRealPath();
-        Path compiler = repo.resolve("toolchain/MyLangCompiler").toRealPath();
+        Path compiler = repo.resolve(Toolchain.COMPILER).toRealPath();
         if (!Files.isDirectory(tests.resolve("succeed")) || !Files.isDirectory(tests.resolve("fail"))) {
             throw new IOException("mytest --compiler expects a MyLangCompiler tests directory: " + tests);
         }
@@ -83,7 +83,7 @@ public final class CompilerTestRunner {
     /** Execute the declarative register-result matrix formerly held in a Python script. */
     public static boolean runE2E(Path repo, Path root) throws IOException, InterruptedException {
         Path tests = root.toRealPath();
-        Path compiler = repo.resolve("toolchain/MyLangCompiler").toRealPath();
+        Path compiler = repo.resolve(Toolchain.COMPILER).toRealPath();
         Path casesFile = tests.resolve("e2e.cases");
         if (!Files.isRegularFile(casesFile)) {
             throw new IOException("mytest --compiler-e2e: missing " + casesFile);
@@ -148,13 +148,12 @@ public final class CompilerTestRunner {
     }
 
     private static boolean runE2EBuild(Path repo) throws IOException, InterruptedException {
-        List<String> locations = List.of("toolchain/MyAssembler", "toolchain/MyLinker", "runtime/MyEmulator");
+        List<String> locations = List.of(Toolchain.ASSEMBLER, Toolchain.LINKER, Toolchain.EMULATOR);
         for (String location : locations) {
             Processes.Result build = Processes.capture(
                     List.of("make", "-C", repo.resolve(location).toString(), "all"), repo);
             if (build.status == 0) continue;
-            if (location.equals("runtime/MyEmulator")
-                    && Files.isExecutable(repo.resolve("runtime/MyEmulator/target/release/myemu"))) {
+            if (location.equals(Toolchain.EMULATOR) && Files.isExecutable(Toolchain.emulator(repo))) {
                 System.err.println("[WARN] could not rebuild MyEmulator; using existing binary");
                 continue;
             }
@@ -202,11 +201,11 @@ public final class CompilerTestRunner {
         Path directory = work.resolve(safeName(test.name));
         Files.createDirectories(directory);
         List<String> objects = new ArrayList<>();
-        Path assembler = repo.resolve("toolchain/MyAssembler/build/myas");
-        Path linker = repo.resolve("toolchain/MyLinker/mllinker");
+        Path assembler = Toolchain.assembler(repo);
+        Path linker = Toolchain.linker(repo);
         // A case may link MyStdLib modules (`../../MyStdLib/text/str.mln`) alongside
         // its own sources; nothing else outside the tests tree.
-        Path stdlib = repo.resolve("toolchain/MyStdLib").normalize();
+        Path stdlib = repo.resolve(Toolchain.STDLIB).normalize();
         for (int index = 0; index < test.sources.size(); index++) {
             Path source = tests.resolve(test.sources.get(index)).normalize();
             boolean allowed = source.startsWith(tests) || source.startsWith(stdlib);
@@ -245,8 +244,7 @@ public final class CompilerTestRunner {
             results.fail(test.name, "link failed\n" + linked.output);
             return;
         }
-        Processes.Result executed = Processes.capture(List.of(
-                repo.resolve("runtime/MyEmulator/target/release/myemu").toString(),
+        Processes.Result executed = Processes.capture(List.of(Toolchain.emulator(repo).toString(),
                 "-i", binary.toString(), "--headless", "--reg", "R1"), directory);
         if (executed.status != 0) {
             results.fail(test.name, "emulator failed\n" + executed.output);

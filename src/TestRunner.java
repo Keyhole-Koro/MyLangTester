@@ -12,16 +12,6 @@ public final class TestRunner {
     private TestRunner() {
     }
 
-    public static Path findRepoRoot() throws IOException {
-        Path cwd = Path.of("").toAbsolutePath();
-        for (Path dir = cwd; dir != null; dir = dir.getParent()) {
-            if (Files.isReadable(dir.resolve("qa/runners/build_toolchain.py"))) {
-                return dir;
-            }
-        }
-        throw new IOException("mytest: could not find repo root containing qa/runners/build_toolchain.py");
-    }
-
     public static boolean run(Path repo, Path testPath) throws IOException, InterruptedException {
         Path absTest = testPath.toRealPath();
         List<TestMeta> annotatedTests = TestParser.readAnnotatedTests(absTest);
@@ -76,7 +66,7 @@ public final class TestRunner {
 
         List<String> command = new ArrayList<>();
         command.add("python3");
-        command.add(repo.resolve("qa/runners/build_toolchain.py").toString());
+        command.add(repo.resolve(Toolchain.BUILD_SCRIPT).toString());
         command.add(paths.stub.toString());
         command.add(paths.source.toString());
         if (!mockTargets.isEmpty()) {
@@ -105,7 +95,7 @@ public final class TestRunner {
     private static boolean executeTest(Path repo, TestMeta meta, TestPaths paths)
             throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
-        command.add(repo.resolve("runtime/MyEmulator/target/release/myemu").toString());
+        command.add(Toolchain.emulator(repo).toString());
         command.add("-i");
         command.add(paths.linked.toString());
         command.add("--headless");
@@ -146,7 +136,7 @@ public final class TestRunner {
     }
 
     private static List<Path> testKitSources(Path repo) throws IOException {
-        Path root = repo.resolve("toolchain/MyLangTestKit");
+        Path root = repo.resolve(Toolchain.TEST_KIT);
         List<Path> sources = List.of(
                 root.resolve("runtime/abi.unsafe.mln"),
                 root.resolve("runtime/testkit.unsafe.mln"),

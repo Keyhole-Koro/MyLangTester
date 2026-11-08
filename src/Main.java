@@ -59,7 +59,7 @@ public final class Main {
             if (inputs.size() != 1) {
                 throw new IllegalArgumentException("mytest compiler mode expects exactly one tests directory");
             }
-            Path repo = TestRunner.findRepoRoot();
+            Path repo = Toolchain.findRepoRoot();
             if (listOnly) {
                 if (compilerE2EMode) {
                     throw new IllegalArgumentException("mytest --list is only available with --compiler");
@@ -90,7 +90,7 @@ public final class Main {
             return;
         }
 
-        Path repo = TestRunner.findRepoRoot();
+        Path repo = Toolchain.findRepoRoot();
         int failed = 0;
         for (Path test : tests) {
             if (!TestRunner.run(repo, test)) {
