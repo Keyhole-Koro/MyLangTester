@@ -302,8 +302,8 @@ public final class TestRunner {
      */
     private static String generatedSourceName(Path absTest) {
         String base = absTest.getFileName().toString();
-        if (base.endsWith(".test.mln")) {
-            base = base.substring(0, base.length() - ".test.mln".length());
+        if (base.endsWith(TestDiscoverer.SUFFIX)) {
+            base = base.substring(0, base.length() - TestDiscoverer.SUFFIX.length());
         } else if (base.endsWith(".mln")) {
             base = base.substring(0, base.length() - ".mln".length());
         }

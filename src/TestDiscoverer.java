@@ -6,6 +6,9 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public final class TestDiscoverer {
+    /** What a test file's name ends with. */
+    public static final String SUFFIX = ".test.mln";
+
     private TestDiscoverer() {
     }
 
@@ -14,7 +17,7 @@ public final class TestDiscoverer {
             throw new IOException("mytest: cannot stat " + path);
         }
         if (Files.isRegularFile(path)) {
-            return path.toString().endsWith(".test.mln") ? List.of(path) : List.of();
+            return isTestFile(path) ? List.of(path) : List.of();
         }
         if (!Files.isDirectory(path)) {
             return List.of();
@@ -23,8 +26,12 @@ public final class TestDiscoverer {
         try (Stream<Path> stream = Files.walk(path)) {
             return stream
                     .filter(Files::isRegularFile)
-                    .filter(file -> file.toString().endsWith(".test.mln"))
+                    .filter(TestDiscoverer::isTestFile)
                     .collect(Collectors.toList());
         }
+    }
+
+    private static boolean isTestFile(Path path) {
+        return path.toString().endsWith(SUFFIX);
     }
 }
