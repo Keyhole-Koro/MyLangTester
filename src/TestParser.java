@@ -3,8 +3,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public final class TestParser {
     private TestParser() {
@@ -24,18 +26,17 @@ public final class TestParser {
     public static List<TestMeta> readAnnotatedTests(Path path) throws IOException {
         String source = Files.readString(path, StandardCharsets.UTF_8);
         List<TestMeta> tests = new ArrayList<>();
-        ScannerState state = new ScannerState();
         int braceDepth = 0;
 
-        for (int i = 0; i < source.length(); i++) {
-            if (state.isCode() && braceDepth == 0 && source.startsWith("/*@Test", i)) {
+        int i = 0;
+        while (i < source.length()) {
+            if (braceDepth == 0 && source.startsWith("/*@Test", i)) {
                 int end = source.indexOf("*/", i + 7);
                 if (end < 0) {
                     throw new IOException("mytest: unclosed @Test pragma in " + path);
                 }
                 TestMeta meta = parseTestPragma(path, source.substring(i + 7, end));
-                int header = skipTrivia(source, end + 2);
-                int openParen = findNextCodeChar(source, header, '(');
+                int openParen = findNextCodeChar(source, end + 2, '(');
                 if (openParen < 0) {
                     throw new IOException("mytest: @Test must precede a function in " + path);
                 }
@@ -53,18 +54,54 @@ public final class TestParser {
                 meta.body = source.substring(bodyStart, findMatching(source, bodyStart, '{', '}') + 1);
                 if (meta.name.isEmpty()) meta.name = functionName;
                 tests.add(meta);
-                i = end + 1;
-                state = new ScannerState();
+                i = end + 2;
                 continue;
             }
-            if (state.isCode()) {
-                if (source.charAt(i) == '{') braceDepth++;
-                if (source.charAt(i) == '}' && braceDepth > 0) braceDepth--;
+            int next = SourceScanner.skipNonCode(source, i);
+            if (next != i) {
+                i = next;
+                continue;
             }
-            int next = state.consume(source, i);
-            if (next != i) i = next;
+            if (source.charAt(i) == '{') braceDepth++;
+            if (source.charAt(i) == '}' && braceDepth > 0) braceDepth--;
+            i++;
         }
         return tests;
+    }
+
+    /**
+     * The functions a test body hands to `mock.of(...)` or `mock.spy(...)`, in
+     * order of first use, each spelled as its linker symbol (`ssd.read_block`
+     * is `ssd_read_block`). Only code counts, so documentation and assertion
+     * text cannot redirect a call to a symbol that does not exist. The
+     * compiler still checks that every target is real.
+     */
+    public static List<String> mockTargets(String body) {
+        Set<String> targets = new LinkedHashSet<>();
+        List<String> tokens = SourceScanner.codeTokens(body);
+        for (int i = 0; i + 4 < tokens.size(); i++) {
+            if (!tokens.get(i).equals("mock") || !tokens.get(i + 1).equals(".")) continue;
+            String factory = tokens.get(i + 2);
+            if (!factory.equals("of") && !factory.equals("spy")) continue;
+            if (!tokens.get(i + 3).equals("(")) continue;
+
+            int cursor = i + 4;
+            if (!isIdentifier(tokens.get(cursor))) continue;
+            StringBuilder target = new StringBuilder(tokens.get(cursor++));
+            while (cursor + 1 < tokens.size() && tokens.get(cursor).equals(".") &&
+                    isIdentifier(tokens.get(cursor + 1))) {
+                target.append('_').append(tokens.get(cursor + 1));
+                cursor += 2;
+            }
+            if (cursor < tokens.size() && tokens.get(cursor).equals(")")) {
+                targets.add(target.toString());
+            }
+        }
+        return List.copyOf(targets);
+    }
+
+    private static boolean isIdentifier(String value) {
+        return value != null && !value.isEmpty() && SourceScanner.isIdentifierStart(value.charAt(0));
     }
 
     /** Write a tiny harness without modifying the annotated test function. */
@@ -100,34 +137,13 @@ public final class TestParser {
         return meta;
     }
 
-    private static int skipTrivia(String source, int index) {
-        int i = index;
-        while (i < source.length()) {
-            if (Character.isWhitespace(source.charAt(i))) {
-                i++;
-            } else if (source.startsWith("//", i)) {
-                int newline = source.indexOf('\n', i + 2);
-                i = newline < 0 ? source.length() : newline + 1;
-            } else if (source.startsWith("/*", i)) {
-                int end = source.indexOf("*/", i + 2);
-                i = end < 0 ? source.length() : end + 2;
-            } else {
-                return i;
-            }
-        }
-        return i;
-    }
-
+    /** The first code `wanted` at or after `from`, or -1 if a `;` or `}` comes first. */
     private static int findNextCodeChar(String source, int from, char wanted) {
-        ScannerState state = new ScannerState();
-        for (int i = from; i < source.length(); i++) {
-            int next = state.consume(source, i);
-            if (next != i) {
-                i = next;
-                continue;
-            }
-            if (state.isCode() && source.charAt(i) == wanted) return i;
-            if (state.isCode() && (source.charAt(i) == ';' || source.charAt(i) == '}')) return -1;
+        for (int i = SourceScanner.nextCode(source, from); i < source.length();
+                i = SourceScanner.nextCode(source, i + 1)) {
+            char c = source.charAt(i);
+            if (c == wanted) return i;
+            if (c == ';' || c == '}') return -1;
         }
         return -1;
     }
@@ -136,7 +152,7 @@ public final class TestParser {
         int end = index;
         while (end > 0 && Character.isWhitespace(source.charAt(end - 1))) end--;
         int start = end;
-        while (start > 0 && isIdentChar(source.charAt(start - 1))) start--;
+        while (start > 0 && SourceScanner.isIdentifierPart(source.charAt(start - 1))) start--;
         return source.substring(start, end);
     }
 
@@ -225,16 +241,8 @@ public final class TestParser {
 
     private static int findMatching(String source, int open, char openChar, char closeChar) throws IOException {
         int depth = 0;
-        ScannerState state = new ScannerState();
-        for (int i = open; i < source.length(); i++) {
-            int next = state.consume(source, i);
-            if (next != i) {
-                i = next;
-                continue;
-            }
-            if (!state.isCode()) {
-                continue;
-            }
+        for (int i = SourceScanner.nextCode(source, open); i < source.length();
+                i = SourceScanner.nextCode(source, i + 1)) {
             char c = source.charAt(i);
             if (c == openChar) {
                 depth++;
@@ -243,72 +251,5 @@ public final class TestParser {
             }
         }
         throw new IOException("mytest: unclosed " + openChar + closeChar + " block");
-    }
-
-    private static boolean isIdentChar(char c) {
-        return Character.isLetterOrDigit(c) || c == '_';
-    }
-
-    private static final class ScannerState {
-        private boolean inString;
-        private boolean inChar;
-        private boolean inLineComment;
-        private boolean inBlockComment;
-
-        int consume(String source, int index) {
-            char c = source.charAt(index);
-            char next = index + 1 < source.length() ? source.charAt(index + 1) : '\0';
-
-            if (inLineComment) {
-                if (c == '\n') {
-                    inLineComment = false;
-                }
-                return index;
-            }
-            if (inBlockComment) {
-                if (c == '*' && next == '/') {
-                    inBlockComment = false;
-                    return index + 1;
-                }
-                return index;
-            }
-            if (inString) {
-                if (c == '\\' && next != '\0') {
-                    return index + 1;
-                }
-                if (c == '"') {
-                    inString = false;
-                }
-                return index;
-            }
-            if (inChar) {
-                if (c == '\\' && next != '\0') {
-                    return index + 1;
-                }
-                if (c == '\'') {
-                    inChar = false;
-                }
-                return index;
-            }
-
-            if (c == '/' && next == '/') {
-                inLineComment = true;
-                return index + 1;
-            }
-            if (c == '/' && next == '*') {
-                inBlockComment = true;
-                return index + 1;
-            }
-            if (c == '"') {
-                inString = true;
-            } else if (c == '\'') {
-                inChar = true;
-            }
-            return index;
-        }
-
-        boolean isCode() {
-            return !inString && !inChar && !inLineComment && !inBlockComment;
-        }
     }
 }

@@ -4,9 +4,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 public final class TestRunner {
     private TestRunner() {
@@ -28,7 +26,7 @@ public final class TestRunner {
     private static boolean runAnnotated(Path repo, Path absTest, TestMeta meta)
             throws IOException, InterruptedException {
         TestPaths paths = derivePaths(repo, absTest, meta.name);
-        List<String> mockTargets = discoverMockTargets(meta.body);
+        List<String> mockTargets = TestParser.mockTargets(meta.body);
 
         try {
             TestParser.writeAnnotatedHarness(absTest, paths.source, meta);
@@ -182,85 +180,6 @@ public final class TestRunner {
         int end = output.indexOf('\n', start);
         String line = end < 0 ? output.substring(start) : output.substring(start, end);
         return line.trim();
-    }
-
-    private static List<String> discoverMockTargets(String text) {
-        Set<String> targets = new LinkedHashSet<>();
-        List<String> tokens = lexCodeTokens(text);
-        for (int i = 0; i + 4 < tokens.size(); i++) {
-            if (!tokens.get(i).equals("mock") || !tokens.get(i + 1).equals(".")) continue;
-            String factory = tokens.get(i + 2);
-            if (!factory.equals("of") && !factory.equals("spy")) continue;
-            if (!tokens.get(i + 3).equals("(")) continue;
-
-            int cursor = i + 4;
-            if (!isIdentifier(tokens.get(cursor))) continue;
-            StringBuilder target = new StringBuilder(tokens.get(cursor++));
-            while (cursor + 1 < tokens.size() && tokens.get(cursor).equals(".") &&
-                    isIdentifier(tokens.get(cursor + 1))) {
-                target.append('_').append(tokens.get(cursor + 1));
-                cursor += 2;
-            }
-            if (cursor < tokens.size() && tokens.get(cursor).equals(")")) {
-                targets.add(target.toString());
-            }
-        }
-        return List.copyOf(targets);
-    }
-
-    /**
-     * Tokenize only the small fragment needed for mock target discovery. This
-     * deliberately skips comments and string/character literals, unlike the
-     * former regex, so documentation and assertion text cannot create a
-     * redirect to a nonexistent symbol. Full semantic validation remains the
-     * compiler's responsibility.
-     */
-    private static List<String> lexCodeTokens(String text) {
-        List<String> tokens = new ArrayList<>();
-        for (int i = 0; i < text.length();) {
-            char ch = text.charAt(i);
-            if (Character.isWhitespace(ch)) { i++; continue; }
-            if (ch == '/' && i + 1 < text.length() && text.charAt(i + 1) == '/') {
-                int end = text.indexOf('\n', i + 2);
-                i = end < 0 ? text.length() : end + 1;
-                continue;
-            }
-            if (ch == '/' && i + 1 < text.length() && text.charAt(i + 1) == '*') {
-                int end = text.indexOf("*/", i + 2);
-                i = end < 0 ? text.length() : end + 2;
-                continue;
-            }
-            if (ch == '"' || ch == '\'') {
-                char quote = ch;
-                i++;
-                while (i < text.length()) {
-                    if (text.charAt(i) == '\\') { i += 2; continue; }
-                    if (text.charAt(i++) == quote) break;
-                }
-                continue;
-            }
-            if (isIdentifierStart(ch)) {
-                int start = i++;
-                while (i < text.length() && isIdentifierPart(text.charAt(i))) i++;
-                tokens.add(text.substring(start, i));
-                continue;
-            }
-            tokens.add(String.valueOf(ch));
-            i++;
-        }
-        return tokens;
-    }
-
-    private static boolean isIdentifier(String value) {
-        return value != null && !value.isEmpty() && isIdentifierStart(value.charAt(0));
-    }
-
-    private static boolean isIdentifierStart(char ch) {
-        return ch == '_' || Character.isAlphabetic(ch);
-    }
-
-    private static boolean isIdentifierPart(char ch) {
-        return isIdentifierStart(ch) || Character.isDigit(ch);
     }
 
     /**
