@@ -73,6 +73,7 @@ public final class CompilerTestRunner {
         if (!Files.isRegularFile(casesFile)) {
             throw new IOException("mytest --compiler-e2e: missing " + casesFile);
         }
+        List<E2ECase> cases = readE2ECases(casesFile);
         if (!runBuild(compiler) || !runE2EBuild(repo)) return false;
 
         Results results = new Results();
@@ -82,7 +83,7 @@ public final class CompilerTestRunner {
         ExecutorService pool = Executors.newFixedThreadPool(jobs());
         try {
             List<Future<Results>> running = new ArrayList<>();
-            for (E2ECase test : readE2ECases(casesFile)) {
+            for (E2ECase test : cases) {
                 running.add(pool.submit(() -> {
                     Results outcome = Results.deferred();
                     runE2ECase(repo, compiler, tests, test, work, outcome);
@@ -180,6 +181,9 @@ public final class CompilerTestRunner {
 
     static List<E2ECase> readE2ECases(Path manifest) throws IOException {
         List<E2ECase> cases = new ArrayList<>();
+        // Work directory -> the case that runs in it. Cases run side by side,
+        // so two may not share one.
+        Map<String, String> directories = new HashMap<>();
         int lineNumber = 0;
         for (String raw : Files.readAllLines(manifest, StandardCharsets.UTF_8)) {
             lineNumber++;
@@ -206,7 +210,14 @@ public final class CompilerTestRunner {
                     if (!flag.isEmpty()) flags.add(flag);
                 }
             }
-            cases.add(new E2ECase(fields[0].trim(), expected, sources, flags));
+            String name = fields[0].trim();
+            String earlier = directories.putIfAbsent(safeName(name), name);
+            if (earlier != null) {
+                String clash = earlier.equals(name) ? "" : " (as " + earlier + ", whose work directory it shares)";
+                throw new IOException("mytest --compiler-e2e: " + name + " is listed twice" + clash + " in "
+                        + manifest + ":" + lineNumber);
+            }
+            cases.add(new E2ECase(name, expected, sources, flags));
         }
         return cases;
     }
@@ -249,7 +260,7 @@ public final class CompilerTestRunner {
             }
             objects.add(object.toString());
         }
-        Path binary = directory.resolve(test.name + ".mbin");
+        Path binary = directory.resolve(safeName(test.name) + ".mbin");
         List<String> link = new ArrayList<>();
         link.add(linker.toString());
         link.add(binary.toString());
@@ -393,8 +404,10 @@ public final class CompilerTestRunner {
         return directory.getFileName() + "/" + directory.relativize(source).toString().replace('\\', '/');
     }
 
-    private static String safeName(String value) {
-        return value.replaceAll("[^A-Za-z0-9_.-]", "_");
+    /** `value` as one file name: other characters become `_`, and `.` or `..` gains a `_` prefix. */
+    static String safeName(String value) {
+        String safe = value.replaceAll("[^A-Za-z0-9_.-]", "_");
+        return safe.isEmpty() || safe.equals(".") || safe.equals("..") ? "_" + safe : safe;
     }
 
     private static void deleteTree(Path root) throws IOException {

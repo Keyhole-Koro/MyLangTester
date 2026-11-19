@@ -311,6 +311,17 @@ public final class UnitTests {
                 write("nosrc.cases", "add | 1 | \n")));
         throwsIOException("bad register value", "invalid register value", () -> CompilerTestRunner.readE2ECases(
                 write("value.cases", "add | forty | a.mln\n")));
+        throwsIOException("a name listed twice", "add is listed twice in", () -> CompilerTestRunner.readE2ECases(
+                write("twice.cases", "add | 1 | a.mln\n# again\nadd | 2 | b.mln\n")));
+        throwsIOException("the line of the second listing", "twice.cases:3", () -> CompilerTestRunner.readE2ECases(
+                write("twice.cases", "add | 1 | a.mln\n# again\nadd | 2 | b.mln\n")));
+        throwsIOException("names sharing a work directory", "a b is listed twice", () -> CompilerTestRunner
+                .readE2ECases(write("collide.cases", "a_b | 1 | a.mln\na b | 2 | b.mln\n")));
+        equal(2, CompilerTestRunner.readE2ECases(write("distinct.cases", "a.b | 1 | a.mln\na-b | 2 | b.mln\n"))
+                .size(), "distinct names");
+        equal("a_b_c.d-e", CompilerTestRunner.safeName("a/b c.d-e"), "safeName");
+        equal("_..", CompilerTestRunner.safeName(".."), "safeName keeps .. inside the work directory");
+        equal("_.", CompilerTestRunner.safeName("."), "safeName keeps . apart from the work directory");
     }
 
     // --- TestDiscoverer ---------------------------------------------------
