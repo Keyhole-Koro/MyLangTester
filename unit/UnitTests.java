@@ -1,4 +1,6 @@
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,6 +45,7 @@ public final class UnitTests {
             run("harness", UnitTests::harness);
             run("build directories stay under .mytest/build", UnitTests::buildDirectories);
             run("escapes in test names", UnitTests::escapedNames);
+            run("a name ending in a backslash fails before the build", UnitTests::trailingBackslashName);
             run("entry stub", UnitTests::entryStub);
             run("diagnostics.cases", UnitTests::diagnosticsCases);
             run("e2e.cases", UnitTests::e2eCases);
@@ -230,6 +233,36 @@ public final class UnitTests {
         check(lines.contains("import { t } from \"/t/a\\\\b \\\"c\\\".test.mln\";"),
                 "the import path is escaped the same way: " + lines);
         equal("a\\nb\\\\", TestParser.escapeString("a\nb\\"), "escapeString");
+    }
+
+    private static void trailingBackslashName() throws Exception {
+        check(!TestRunner.mlcCanSpell("ends in \\"), "mlc cannot read a literal ending in a backslash");
+        check(TestRunner.mlcCanSpell("a \\ b \"q\""), "a backslash or quote elsewhere is fine");
+        check(TestRunner.mlcCanSpell("ends in \""), "a trailing quote is fine");
+        check(TestRunner.mlcCanSpell(""), "an empty name is fine");
+
+        // mlc would misread the harness, so the test fails with a reason
+        // before anything is written under .mytest or the toolchain runs.
+        Path repo = Files.createDirectories(scratch.resolve("trailing-repo"));
+        Path dir = Files.createDirectories(scratch.resolve("trailing"));
+        Path test = write("trailing/t.test.mln", "/*@Test \"ends in \\\\\"*/\nvoid t() {}\n");
+        ByteArrayOutputStream err = new ByteArrayOutputStream();
+        PrintStream original = System.err;
+        boolean passed;
+        System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+        try {
+            passed = TestRunner.run(repo, test);
+        } finally {
+            System.setErr(original);
+        }
+        check(!passed, "the test fails");
+        contains(err.toString(StandardCharsets.UTF_8),
+                "[FAIL] ends in \\: mlc cannot read a string literal that ends in a backslash", "the reason");
+        check(!Files.exists(repo.resolve(".mytest")), "nothing is built");
+        try (Stream<Path> left = Files.list(dir)) {
+            equal(List.of(test.getFileName()), left.map(Path::getFileName).collect(Collectors.toList()),
+                    "the generated harness is removed");
+        }
     }
 
     private static void entryStub() {

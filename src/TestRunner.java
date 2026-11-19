@@ -41,6 +41,11 @@ public final class TestRunner {
 
     private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths, List<String> mockTargets)
             throws IOException, InterruptedException {
+        if (!mlcCanSpell(meta.name)) {
+            System.err.printf("[FAIL] %s: mlc cannot read a string literal that ends in a backslash%n",
+                    meta.name);
+            return false;
+        }
         if (mockTargets.size() > 8) {
             System.err.printf("[FAIL] %s: TestKit supports at most 8 mock targets per test (found %d)%n",
                     meta.name, mockTargets.size());
@@ -149,6 +154,17 @@ public final class TestRunner {
     /** Whether a MyAssembler string literal, read up to the next `"` without escapes, can hold `text`. */
     static boolean assemblerCanSpell(String text) {
         return text.indexOf('"') < 0;
+    }
+
+    /**
+     * Whether mlc can read `text` back from a string literal in the harness.
+     * mlc's lexer ends a literal at the first `"` whose previous character
+     * is not `\`, so when `text` ends in a backslash, the `\\` it is
+     * escaped to hides the closing quote and the build fails. Every other
+     * text, escaped by TestParser.escapeString, reads back intact.
+     */
+    static boolean mlcCanSpell(String text) {
+        return !text.endsWith("\\");
     }
 
     private static List<Path> testKitSources(Path repo) throws IOException {
