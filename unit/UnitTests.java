@@ -42,6 +42,8 @@ public final class UnitTests {
             run("generated source names", UnitTests::generatedSourceNames);
             run("harness", UnitTests::harness);
             run("build directories stay under .mytest/build", UnitTests::buildDirectories);
+            run("escapes in test names", UnitTests::escapedNames);
+            run("entry stub", UnitTests::entryStub);
             run("diagnostics.cases", UnitTests::diagnosticsCases);
             run("e2e.cases", UnitTests::e2eCases);
             run("test discovery", UnitTests::testDiscovery);
@@ -200,11 +202,41 @@ public final class UnitTests {
         equal("_..", TestRunner.derivePaths(repo, test, "..").buildDir.getFileName().toString(), "..");
         equal(".._.._x", TestRunner.derivePaths(repo, test, "../../x").buildDir.getFileName().toString(),
                 "../../x");
+        equal("line_break_tab", TestRunner.derivePaths(repo, test, "line\nbreak\ttab").buildDir.getFileName()
+                .toString(), "control characters become _");
         for (String name : List.of("options on one line", "it's fine", "a.b", "...")) {
             TestRunner.TestPaths paths = TestRunner.derivePaths(repo, test, name);
             equal(root.resolve(name), paths.buildDir, "<" + name + "> keeps its directory");
             equal(root.resolve(name).resolve(name + "_linked.mbin"), paths.linked, "<" + name + ">'s binary");
         }
+    }
+
+    private static void escapedNames() throws IOException {
+        equal("a \\", parseOne("/*@Test \"a \\\\\"*/\nvoid t() {}\n").name, "a name ending in an escaped backslash");
+        equal("a \\\" b", parseOne("/*@Test \"a \\\\\\\" b\"*/\nvoid t() {}\n").name,
+                "an escaped backslash, then an escaped quote");
+        equal("tab\there", parseOne("/*@Test \"tab\\there\"*/\nvoid t() {}\n").name, "\\t in a name");
+
+        TestMeta meta = new TestMeta();
+        meta.name = "line\nnext\ttab\rcr\\ \"q\"";
+        meta.functionName = "t";
+        Path out = scratch.resolve("escaped_harness.mln");
+        TestParser.writeAnnotatedHarness(Path.of("/t/a\\b \"c\".test.mln"), out, meta);
+        List<String> lines = List.of(Files.readString(out, StandardCharsets.UTF_8).split("\n", -1));
+        check(lines.contains("testkit_pass(\"line\\nnext\\ttab\\rcr\\\\ \\\"q\\\"\");"),
+                "the name's newline, tab, CR, backslash and quotes are escaped on one line: " + lines);
+        check(lines.contains("import { t } from \"/t/a\\\\b \\\"c\\\".test.mln\";"),
+                "the import path is escaped the same way: " + lines);
+        equal("a\\nb\\\\", TestParser.escapeString("a\nb\\"), "escapeString");
+    }
+
+    private static void entryStub() {
+        String stub = TestRunner.stubAssembly("/t/a\\b_gen_test.mln");
+        contains(stub, "import { kernel_main } from \"/t/a\\b_gen_test.mln\"\n",
+                "MyAssembler reads the path verbatim, so a backslash is not doubled");
+        contains(stub, "__START__:\n  call kernel_main\n  halt\n", "the entry calls kernel_main");
+        check(TestRunner.assemblerCanSpell("/t/a b'c\\d.mln"), "an ordinary path");
+        check(!TestRunner.assemblerCanSpell("/t/a\"b.mln"), "a quote cannot be spelled");
     }
 
     private static void harness() throws IOException {

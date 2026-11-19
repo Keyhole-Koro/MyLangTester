@@ -46,14 +46,15 @@ public final class TestRunner {
                     meta.name, mockTargets.size());
             return false;
         }
+        String importPath = paths.source.toString();
+        if (!assemblerCanSpell(importPath)) {
+            System.err.printf("[FAIL] %s: MyAssembler cannot import %s: its path has a quote%n",
+                    meta.name, importPath);
+            return false;
+        }
         Files.createDirectories(paths.buildDir);
 
-        String importPath = paths.source.toString().replace("\\", "\\\\").replace("\"", "\\\"");
-        String stub = "import { kernel_main } from \"" + importPath + "\"\n\n"
-                + "__START__:\n"
-                + "  call kernel_main\n"
-                + "  halt\n";
-        Files.writeString(paths.stub, stub, StandardCharsets.UTF_8);
+        Files.writeString(paths.stub, stubAssembly(importPath), StandardCharsets.UTF_8);
         Files.writeString(paths.input, meta.stdinText, StandardCharsets.UTF_8);
         if (meta.disk.attached) {
             prepareDisk(meta.disk, paths);
@@ -131,6 +132,23 @@ public final class TestRunner {
             return false;
         }
         return true;
+    }
+
+    /**
+     * The entry stub that calls the generated harness. MyAssembler reads a
+     * string literal verbatim, up to the next `"`, with no escapes, so the
+     * path is written as it is; see assemblerCanSpell.
+     */
+    static String stubAssembly(String importPath) {
+        return "import { kernel_main } from \"" + importPath + "\"\n\n"
+                + "__START__:\n"
+                + "  call kernel_main\n"
+                + "  halt\n";
+    }
+
+    /** Whether a MyAssembler string literal, read up to the next `"` without escapes, can hold `text`. */
+    static boolean assemblerCanSpell(String text) {
+        return text.indexOf('"') < 0;
     }
 
     private static List<Path> testKitSources(Path repo) throws IOException {
@@ -316,12 +334,18 @@ public final class TestRunner {
     /**
      * The test's directory under .mytest/build: its name as one path
      * component, so that no name reaches outside the build root, where
-     * prepareDisk deletes and recreates disk.img. `/` and `\` become `_`,
-     * and `.`, `..` and an empty name gain a `_` prefix; any other name is
-     * kept as it is.
+     * prepareDisk deletes and recreates disk.img. `/`, `\` and control
+     * characters such as a line break, which mlc cannot take in a path,
+     * become `_`, and `.`, `..` and an empty name gain a `_` prefix; any
+     * other name is kept as it is.
      */
     static String buildDirName(String name) {
-        String component = name.replace('/', '_').replace('\\', '_');
+        StringBuilder out = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            out.append(c == '/' || c == '\\' || Character.isISOControl(c) ? '_' : c);
+        }
+        String component = out.toString();
         if (component.isEmpty() || component.equals(".") || component.equals("..")) {
             return "_" + component;
         }
