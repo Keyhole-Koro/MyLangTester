@@ -125,7 +125,7 @@ public final class CompilerTestRunner {
     }
 
     /** Read diagnostics.cases; the format is described at the top of that file. */
-    private static Expectations readExpectations(Path manifest) throws IOException {
+    static Expectations readExpectations(Path manifest) throws IOException {
         Expectations expected = new Expectations();
         int lineNumber = 0;
         for (String raw : Files.readAllLines(manifest, StandardCharsets.UTF_8)) {
@@ -178,7 +178,7 @@ public final class CompilerTestRunner {
         return true;
     }
 
-    private static List<E2ECase> readE2ECases(Path manifest) throws IOException {
+    static List<E2ECase> readE2ECases(Path manifest) throws IOException {
         List<E2ECase> cases = new ArrayList<>();
         int lineNumber = 0;
         for (String raw : Files.readAllLines(manifest, StandardCharsets.UTF_8)) {
@@ -406,7 +406,7 @@ public final class CompilerTestRunner {
     }
 
     /** What diagnostics.cases says that the fixtures' directories do not. */
-    private static final class Expectations {
+    static final class Expectations {
         // Fixture -> text that must appear when it is rejected.
         final Map<String, String> errors = new HashMap<>();
         final Set<String> skipped = new HashSet<>();
@@ -414,7 +414,7 @@ public final class CompilerTestRunner {
     }
 
     /** A source written under `filename` that mlc must accept or refuse. */
-    private static final class ProfileCase {
+    static final class ProfileCase {
         final String filename;
         final String source;
         final boolean accepted;
@@ -428,7 +428,7 @@ public final class CompilerTestRunner {
         }
     }
 
-    private static final class E2ECase {
+    static final class E2ECase {
         final String name;
         final long expected;
         final List<String> sources;

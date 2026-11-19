@@ -300,7 +300,7 @@ public final class TestRunner {
      * `serial_rx.test.mln` -> `serial_rx_gen_test.mln`,
      * `dom_lowering.dom.test.mln` -> `dom_lowering_gen_test.dom.mln`.
      */
-    private static String generatedSourceName(Path absTest) {
+    static String generatedSourceName(Path absTest) {
         String base = absTest.getFileName().toString();
         if (base.endsWith(TestDiscoverer.SUFFIX)) {
             base = base.substring(0, base.length() - TestDiscoverer.SUFFIX.length());
