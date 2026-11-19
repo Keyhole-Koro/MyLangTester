@@ -47,6 +47,8 @@ public final class UnitTests {
             run("diagnostics.cases", UnitTests::diagnosticsCases);
             run("e2e.cases", UnitTests::e2eCases);
             run("test discovery", UnitTests::testDiscovery);
+            run("error descriptions", UnitTests::errorDescriptions);
+            run("MYTEST_JOBS", UnitTests::jobs);
         } finally {
             deleteTree(scratch);
         }
@@ -341,6 +343,36 @@ public final class UnitTests {
                 "a test file names itself");
         equal(List.of(), TestDiscoverer.discover(root.resolve("b.mln")), "another file is no test");
         throwsIOException("missing path", "cannot stat", () -> TestDiscoverer.discover(root.resolve("none")));
+    }
+
+    // --- Main -------------------------------------------------------------
+
+    private static void errorDescriptions() {
+        equal("plain", Main.describe(new IOException("plain")), "a message alone");
+        equal("java.lang.NullPointerException", Main.describe(new NullPointerException()),
+                "no message: the exception itself, not null");
+        equal("mytest --compiler-e2e: a case could not run: java.io.IOException: disk full",
+                Main.describe(new IOException("mytest --compiler-e2e: a case could not run",
+                        new IOException("disk full"))), "the cause is kept");
+        equal("outer: java.lang.IllegalStateException: middle: java.lang.RuntimeException: inner",
+                Main.describe(new IOException("outer",
+                        new IllegalStateException("middle", new RuntimeException("inner")))), "every cause");
+        equal("java.lang.RuntimeException: inner", Main.describe(new IOException(new RuntimeException("inner"))),
+                "a cause already in the message is not repeated");
+    }
+
+    private static void jobs() {
+        equal(3, CompilerTestRunner.jobs("3"), "a number");
+        equal(1, CompilerTestRunner.jobs("0"), "at least one");
+        equal(Runtime.getRuntime().availableProcessors(), CompilerTestRunner.jobs(null), "unset");
+        equal(Runtime.getRuntime().availableProcessors(), CompilerTestRunner.jobs(""), "empty");
+        checks++;
+        try {
+            CompilerTestRunner.jobs("abc");
+            fail("MYTEST_JOBS=abc was accepted");
+        } catch (IllegalArgumentException e) {
+            equal("mytest: MYTEST_JOBS must be a positive integer, not \"abc\"", e.getMessage(), "MYTEST_JOBS=abc");
+        }
     }
 
     // --- helpers ----------------------------------------------------------

@@ -74,13 +74,14 @@ public final class CompilerTestRunner {
             throw new IOException("mytest --compiler-e2e: missing " + casesFile);
         }
         List<E2ECase> cases = readE2ECases(casesFile);
+        int jobs = jobs(System.getenv("MYTEST_JOBS"));
         if (!runBuild(compiler) || !runE2EBuild(repo)) return false;
 
         Results results = new Results();
         Path work = Files.createTempDirectory("mytest-compiler-e2e-");
         // Each case has its own directory, so they run side by side. Results are
         // reported in manifest order, so the output does not depend on timing.
-        ExecutorService pool = Executors.newFixedThreadPool(jobs());
+        ExecutorService pool = Executors.newFixedThreadPool(jobs);
         try {
             List<Future<Results>> running = new ArrayList<>();
             for (E2ECase test : cases) {
@@ -106,11 +107,15 @@ public final class CompilerTestRunner {
         return results.failed == 0;
     }
 
-    /** MYTEST_JOBS overrides the default of one case per processor. */
-    private static int jobs() {
-        String configured = System.getenv("MYTEST_JOBS");
-        if (configured != null && !configured.isEmpty()) return Math.max(1, Integer.parseInt(configured));
-        return Runtime.getRuntime().availableProcessors();
+    /** MYTEST_JOBS, `configured`, overrides the default of one case per processor. */
+    static int jobs(String configured) {
+        if (configured == null || configured.isEmpty()) return Runtime.getRuntime().availableProcessors();
+        try {
+            return Math.max(1, Integer.parseInt(configured));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "mytest: MYTEST_JOBS must be a positive integer, not \"" + configured + "\"");
+        }
     }
 
     public static void list(Path root) throws IOException {
