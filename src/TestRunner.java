@@ -313,21 +313,37 @@ public final class TestRunner {
         return stem.replaceAll("[/ \\t]", "_") + "_gen_test" + modifiers + ".mln";
     }
 
-    private static TestPaths derivePaths(Path repo, Path absTest, String name) {
+    /**
+     * The test's directory under .mytest/build: its name as one path
+     * component, so that no name reaches outside the build root, where
+     * prepareDisk deletes and recreates disk.img. `/` and `\` become `_`,
+     * and `.`, `..` and an empty name gain a `_` prefix; any other name is
+     * kept as it is.
+     */
+    static String buildDirName(String name) {
+        String component = name.replace('/', '_').replace('\\', '_');
+        if (component.isEmpty() || component.equals(".") || component.equals("..")) {
+            return "_" + component;
+        }
+        return component;
+    }
+
+    static TestPaths derivePaths(Path repo, Path absTest, String name) {
         Path source = absTest.resolveSibling(generatedSourceName(absTest));
-        Path buildDir = repo.resolve(".mytest/build").resolve(name);
+        String dirName = buildDirName(name);
+        Path buildDir = repo.resolve(".mytest/build").resolve(dirName);
         return new TestPaths(
                 absTest.getParent(),
                 source,
                 buildDir,
                 buildDir.resolve("test_stub.masm"),
                 buildDir.resolve("mock_entries.masm"),
-                buildDir.resolve(name + "_linked.mbin"),
+                buildDir.resolve(dirName + "_linked.mbin"),
                 buildDir.resolve("stdin.txt"),
                 buildDir.resolve("disk.img"));
     }
 
-    private static final class TestPaths {
+    static final class TestPaths {
         final Path testDir;
         final Path source;
         final Path buildDir;

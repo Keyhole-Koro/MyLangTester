@@ -41,6 +41,7 @@ public final class UnitTests {
             run("source scanner", UnitTests::sourceScanner);
             run("generated source names", UnitTests::generatedSourceNames);
             run("harness", UnitTests::harness);
+            run("build directories stay under .mytest/build", UnitTests::buildDirectories);
             run("diagnostics.cases", UnitTests::diagnosticsCases);
             run("e2e.cases", UnitTests::e2eCases);
             run("test discovery", UnitTests::testDiscovery);
@@ -182,6 +183,28 @@ public final class UnitTests {
         equal("plain_gen_test.mln", TestRunner.generatedSourceName(Path.of("/t/plain.mln")), "a .mln file");
         equal("a_b_gen_test.mln", TestRunner.generatedSourceName(Path.of("/t/a b.test.mln")),
                 "spaces become underscores");
+    }
+
+    private static void buildDirectories() {
+        Path repo = scratch.resolve("repo");
+        Path root = repo.resolve(".mytest/build");
+        Path test = Path.of("/t/x.test.mln");
+        for (String name : List.of("../../x", "..", ".", "a/../../b", "a\\..\\b", "/abs", "")) {
+            TestRunner.TestPaths paths = TestRunner.derivePaths(repo, test, name);
+            equal(root, paths.buildDir.getParent(), "<" + name + "> is one directory under the build root");
+            check(paths.buildDir.normalize().startsWith(root) && !paths.buildDir.normalize().equals(root),
+                    "<" + name + "> stays below the build root");
+            equal(paths.buildDir, paths.linked.getParent(), "<" + name + ">'s binary is in its directory");
+            equal(paths.buildDir, paths.disk.getParent(), "<" + name + ">'s disk is in its directory");
+        }
+        equal("_..", TestRunner.derivePaths(repo, test, "..").buildDir.getFileName().toString(), "..");
+        equal(".._.._x", TestRunner.derivePaths(repo, test, "../../x").buildDir.getFileName().toString(),
+                "../../x");
+        for (String name : List.of("options on one line", "it's fine", "a.b", "...")) {
+            TestRunner.TestPaths paths = TestRunner.derivePaths(repo, test, name);
+            equal(root.resolve(name), paths.buildDir, "<" + name + "> keeps its directory");
+            equal(root.resolve(name).resolve(name + "_linked.mbin"), paths.linked, "<" + name + ">'s binary");
+        }
     }
 
     private static void harness() throws IOException {
