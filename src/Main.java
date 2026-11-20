@@ -1,7 +1,9 @@
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 
 public final class Main {
     private Main() {
@@ -11,9 +13,26 @@ public final class Main {
         try {
             run(args);
         } catch (Exception e) {
-            System.err.println(e.getMessage());
+            System.err.println(describe(e));
             System.exit(1);
         }
+    }
+
+    /**
+     * What to print for an error that stops mytest: its message, or the
+     * exception itself when it has none, followed by every cause that adds
+     * something to it.
+     */
+    static String describe(Throwable error) {
+        String message = error.getMessage();
+        StringBuilder out = new StringBuilder(message == null || message.isEmpty() ? error.toString() : message);
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        seen.add(error);
+        for (Throwable cause = error.getCause(); cause != null && seen.add(cause); cause = cause.getCause()) {
+            String text = cause.toString();
+            if (out.indexOf(text) < 0) out.append(": ").append(text);
+        }
+        return out.toString();
     }
 
     private static void run(String[] args) throws Exception {

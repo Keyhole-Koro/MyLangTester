@@ -83,8 +83,13 @@ make
 ```bash
 ./build/mytest --list path/to/tests
 ./build/mytest path/to/tests/example.test.mln
-make test    # the runner's own cases in tests/, e.g. both option layouts
+make unit-test  # the runner's parsing logic, with the JDK alone
+make test    # unit-test, then the runner's own cases in tests/, e.g. both option layouts
 ```
+
+`make unit-test` compiles `unit/UnitTests.java` with the runner and checks
+pragma and option parsing, mock targets, the source scanner, generated names
+and the compiler manifests without the MyComputer toolchain.
 
 ## Test Declaration
 

@@ -73,16 +73,18 @@ public final class CompilerTestRunner {
         if (!Files.isRegularFile(casesFile)) {
             throw new IOException("mytest --compiler-e2e: missing " + casesFile);
         }
+        List<E2ECase> cases = readE2ECases(casesFile);
+        int jobs = jobs(System.getenv("MYTEST_JOBS"));
         if (!runBuild(compiler) || !runE2EBuild(repo)) return false;
 
         Results results = new Results();
         Path work = Files.createTempDirectory("mytest-compiler-e2e-");
         // Each case has its own directory, so they run side by side. Results are
         // reported in manifest order, so the output does not depend on timing.
-        ExecutorService pool = Executors.newFixedThreadPool(jobs());
+        ExecutorService pool = Executors.newFixedThreadPool(jobs);
         try {
             List<Future<Results>> running = new ArrayList<>();
-            for (E2ECase test : readE2ECases(casesFile)) {
+            for (E2ECase test : cases) {
                 running.add(pool.submit(() -> {
                     Results outcome = Results.deferred();
                     runE2ECase(repo, compiler, tests, test, work, outcome);
@@ -105,11 +107,15 @@ public final class CompilerTestRunner {
         return results.failed == 0;
     }
 
-    /** MYTEST_JOBS overrides the default of one case per processor. */
-    private static int jobs() {
-        String configured = System.getenv("MYTEST_JOBS");
-        if (configured != null && !configured.isEmpty()) return Math.max(1, Integer.parseInt(configured));
-        return Runtime.getRuntime().availableProcessors();
+    /** MYTEST_JOBS, `configured`, overrides the default of one case per processor. */
+    static int jobs(String configured) {
+        if (configured == null || configured.isEmpty()) return Runtime.getRuntime().availableProcessors();
+        try {
+            return Math.max(1, Integer.parseInt(configured));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "mytest: MYTEST_JOBS must be a positive integer, not \"" + configured + "\"");
+        }
     }
 
     public static void list(Path root) throws IOException {
@@ -125,7 +131,7 @@ public final class CompilerTestRunner {
     }
 
     /** Read diagnostics.cases; the format is described at the top of that file. */
-    private static Expectations readExpectations(Path manifest) throws IOException {
+    static Expectations readExpectations(Path manifest) throws IOException {
         Expectations expected = new Expectations();
         int lineNumber = 0;
         for (String raw : Files.readAllLines(manifest, StandardCharsets.UTF_8)) {
@@ -178,8 +184,11 @@ public final class CompilerTestRunner {
         return true;
     }
 
-    private static List<E2ECase> readE2ECases(Path manifest) throws IOException {
+    static List<E2ECase> readE2ECases(Path manifest) throws IOException {
         List<E2ECase> cases = new ArrayList<>();
+        // Work directory -> the case that runs in it. Cases run side by side,
+        // so two may not share one.
+        Map<String, String> directories = new HashMap<>();
         int lineNumber = 0;
         for (String raw : Files.readAllLines(manifest, StandardCharsets.UTF_8)) {
             lineNumber++;
@@ -206,7 +215,14 @@ public final class CompilerTestRunner {
                     if (!flag.isEmpty()) flags.add(flag);
                 }
             }
-            cases.add(new E2ECase(fields[0].trim(), expected, sources, flags));
+            String name = fields[0].trim();
+            String earlier = directories.putIfAbsent(safeName(name), name);
+            if (earlier != null) {
+                String clash = earlier.equals(name) ? "" : " (as " + earlier + ", whose work directory it shares)";
+                throw new IOException("mytest --compiler-e2e: " + name + " is listed twice" + clash + " in "
+                        + manifest + ":" + lineNumber);
+            }
+            cases.add(new E2ECase(name, expected, sources, flags));
         }
         return cases;
     }
@@ -249,7 +265,7 @@ public final class CompilerTestRunner {
             }
             objects.add(object.toString());
         }
-        Path binary = directory.resolve(test.name + ".mbin");
+        Path binary = directory.resolve(safeName(test.name) + ".mbin");
         List<String> link = new ArrayList<>();
         link.add(linker.toString());
         link.add(binary.toString());
@@ -393,8 +409,10 @@ public final class CompilerTestRunner {
         return directory.getFileName() + "/" + directory.relativize(source).toString().replace('\\', '/');
     }
 
-    private static String safeName(String value) {
-        return value.replaceAll("[^A-Za-z0-9_.-]", "_");
+    /** `value` as one file name: other characters become `_`, and `.` or `..` gains a `_` prefix. */
+    static String safeName(String value) {
+        String safe = value.replaceAll("[^A-Za-z0-9_.-]", "_");
+        return safe.isEmpty() || safe.equals(".") || safe.equals("..") ? "_" + safe : safe;
     }
 
     private static void deleteTree(Path root) throws IOException {
@@ -406,7 +424,7 @@ public final class CompilerTestRunner {
     }
 
     /** What diagnostics.cases says that the fixtures' directories do not. */
-    private static final class Expectations {
+    static final class Expectations {
         // Fixture -> text that must appear when it is rejected.
         final Map<String, String> errors = new HashMap<>();
         final Set<String> skipped = new HashSet<>();
@@ -414,7 +432,7 @@ public final class CompilerTestRunner {
     }
 
     /** A source written under `filename` that mlc must accept or refuse. */
-    private static final class ProfileCase {
+    static final class ProfileCase {
         final String filename;
         final String source;
         final boolean accepted;
@@ -428,7 +446,7 @@ public final class CompilerTestRunner {
         }
     }
 
-    private static final class E2ECase {
+    static final class E2ECase {
         final String name;
         final long expected;
         final List<String> sources;
