@@ -106,10 +106,9 @@ public final class TestParser {
 
     /** Write a tiny harness without modifying the annotated test function. */
     public static void writeAnnotatedHarness(Path original, Path outPath, TestMeta meta) throws IOException {
-        String importPath = original.toString().replace("\\", "\\\\").replace("\"", "\\\"");
         StringBuilder generated = new StringBuilder();
         generated.append("import { ").append(meta.functionName).append(" } from \"")
-                .append(importPath).append("\";\n\n")
+                .append(escapeString(original.toString())).append("\";\n\n")
                 .append("extern void testkit_pass(char* name);\n")
                 .append("extern void __mlt_require_abi_v1();\n\n")
                 .append("i32 kernel_main() {\n")
@@ -156,8 +155,37 @@ public final class TestParser {
         return source.substring(start, end);
     }
 
-    private static String escapeString(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    /**
+     * `value` spelled inside a MyLang string literal. The MyLang lexer reads
+     * `\\`, `\"`, `\n`, `\t` and `\r` back as the characters they stand for,
+     * so a name or path keeps a line break or tab without breaking the line.
+     */
+    static String escapeString(String value) {
+        StringBuilder out = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\':
+                    out.append("\\\\");
+                    break;
+                case '"':
+                    out.append("\\\"");
+                    break;
+                case '\n':
+                    out.append("\\n");
+                    break;
+                case '\t':
+                    out.append("\\t");
+                    break;
+                case '\r':
+                    out.append("\\r");
+                    break;
+                default:
+                    out.append(c);
+                    break;
+            }
+        }
+        return out.toString();
     }
 
     /**
@@ -277,7 +305,10 @@ public final class TestParser {
 
     private static int findStringEnd(String source, int quote) throws IOException {
         for (int i = quote + 1; i < source.length(); i++) {
-            if (source.charAt(i) == '"' && source.charAt(i - 1) != '\\') {
+            char c = source.charAt(i);
+            if (c == '\\') {
+                i++;
+            } else if (c == '"') {
                 return i;
             }
         }

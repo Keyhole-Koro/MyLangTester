@@ -41,19 +41,25 @@ public final class TestRunner {
 
     private static boolean buildTest(Path repo, TestMeta meta, TestPaths paths, List<String> mockTargets)
             throws IOException, InterruptedException {
+        if (!mlcCanSpell(meta.name)) {
+            System.err.printf("[FAIL] %s: mlc cannot read a string literal that ends in a backslash%n",
+                    meta.name);
+            return false;
+        }
         if (mockTargets.size() > 8) {
             System.err.printf("[FAIL] %s: TestKit supports at most 8 mock targets per test (found %d)%n",
                     meta.name, mockTargets.size());
             return false;
         }
+        String importPath = paths.source.toString();
+        if (!assemblerCanSpell(importPath)) {
+            System.err.printf("[FAIL] %s: MyAssembler cannot import %s: its path has a quote%n",
+                    meta.name, importPath);
+            return false;
+        }
         Files.createDirectories(paths.buildDir);
 
-        String importPath = paths.source.toString().replace("\\", "\\\\").replace("\"", "\\\"");
-        String stub = "import { kernel_main } from \"" + importPath + "\"\n\n"
-                + "__START__:\n"
-                + "  call kernel_main\n"
-                + "  halt\n";
-        Files.writeString(paths.stub, stub, StandardCharsets.UTF_8);
+        Files.writeString(paths.stub, stubAssembly(importPath), StandardCharsets.UTF_8);
         Files.writeString(paths.input, meta.stdinText, StandardCharsets.UTF_8);
         if (meta.disk.attached) {
             prepareDisk(meta.disk, paths);
@@ -131,6 +137,34 @@ public final class TestRunner {
             return false;
         }
         return true;
+    }
+
+    /**
+     * The entry stub that calls the generated harness. MyAssembler reads a
+     * string literal verbatim, up to the next `"`, with no escapes, so the
+     * path is written as it is; see assemblerCanSpell.
+     */
+    static String stubAssembly(String importPath) {
+        return "import { kernel_main } from \"" + importPath + "\"\n\n"
+                + "__START__:\n"
+                + "  call kernel_main\n"
+                + "  halt\n";
+    }
+
+    /** Whether a MyAssembler string literal, read up to the next `"` without escapes, can hold `text`. */
+    static boolean assemblerCanSpell(String text) {
+        return text.indexOf('"') < 0;
+    }
+
+    /**
+     * Whether mlc can read `text` back from a string literal in the harness.
+     * mlc's lexer ends a literal at the first `"` whose previous character
+     * is not `\`, so when `text` ends in a backslash, the `\\` it is
+     * escaped to hides the closing quote and the build fails. Every other
+     * text, escaped by TestParser.escapeString, reads back intact.
+     */
+    static boolean mlcCanSpell(String text) {
+        return !text.endsWith("\\");
     }
 
     private static List<Path> testKitSources(Path repo) throws IOException {
@@ -300,7 +334,7 @@ public final class TestRunner {
      * `serial_rx.test.mln` -> `serial_rx_gen_test.mln`,
      * `dom_lowering.dom.test.mln` -> `dom_lowering_gen_test.dom.mln`.
      */
-    private static String generatedSourceName(Path absTest) {
+    static String generatedSourceName(Path absTest) {
         String base = absTest.getFileName().toString();
         if (base.endsWith(TestDiscoverer.SUFFIX)) {
             base = base.substring(0, base.length() - TestDiscoverer.SUFFIX.length());
@@ -313,21 +347,43 @@ public final class TestRunner {
         return stem.replaceAll("[/ \\t]", "_") + "_gen_test" + modifiers + ".mln";
     }
 
-    private static TestPaths derivePaths(Path repo, Path absTest, String name) {
+    /**
+     * The test's directory under .mytest/build: its name as one path
+     * component, so that no name reaches outside the build root, where
+     * prepareDisk deletes and recreates disk.img. `/`, `\` and control
+     * characters such as a line break, which mlc cannot take in a path,
+     * become `_`, and `.`, `..` and an empty name gain a `_` prefix; any
+     * other name is kept as it is.
+     */
+    static String buildDirName(String name) {
+        StringBuilder out = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            out.append(c == '/' || c == '\\' || Character.isISOControl(c) ? '_' : c);
+        }
+        String component = out.toString();
+        if (component.isEmpty() || component.equals(".") || component.equals("..")) {
+            return "_" + component;
+        }
+        return component;
+    }
+
+    static TestPaths derivePaths(Path repo, Path absTest, String name) {
         Path source = absTest.resolveSibling(generatedSourceName(absTest));
-        Path buildDir = repo.resolve(".mytest/build").resolve(name);
+        String dirName = buildDirName(name);
+        Path buildDir = repo.resolve(".mytest/build").resolve(dirName);
         return new TestPaths(
                 absTest.getParent(),
                 source,
                 buildDir,
                 buildDir.resolve("test_stub.masm"),
                 buildDir.resolve("mock_entries.masm"),
-                buildDir.resolve(name + "_linked.mbin"),
+                buildDir.resolve(dirName + "_linked.mbin"),
                 buildDir.resolve("stdin.txt"),
                 buildDir.resolve("disk.img"));
     }
 
-    private static final class TestPaths {
+    static final class TestPaths {
         final Path testDir;
         final Path source;
         final Path buildDir;
